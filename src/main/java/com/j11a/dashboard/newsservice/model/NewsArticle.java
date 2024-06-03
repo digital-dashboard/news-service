@@ -1,5 +1,6 @@
 package com.j11a.dashboard.newsservice.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -12,8 +13,10 @@ public class NewsArticle {
     private String author;
     private String excerpt;
     private String summary;
+
+    @JsonProperty("published_date")
     private String publishedDate;
-    private String url;
+    private String link;
     private String country;
     private Topic topic;
 }

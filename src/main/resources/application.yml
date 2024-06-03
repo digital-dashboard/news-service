@@ -6,6 +6,8 @@ spring:
       accept-case-insensitive-enums: true
   devtools:
     add-properties: false
+  profiles:
+    default: prod
 newscatcher:
   host: api.newscatcherapi.com/v2
   pathLatestHeadlines: latest_headlines
