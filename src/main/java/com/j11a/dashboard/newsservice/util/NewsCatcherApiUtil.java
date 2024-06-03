@@ -21,7 +21,8 @@ public class NewsCatcherApiUtil {
                 .scheme("https")
                 .host(this.host)
                 .path(this.pathLatestHeadlines)
-                .queryParam("lang", "en");
+                .queryParam("lang", "en")
+                .queryParam("sources", String.join(",", getDefaultSources()));
 
         Optional.ofNullable(period).ifPresent(p -> uriComponentsBuilder.queryParam("when", p));
         Optional.ofNullable(countries).ifPresent(c ->uriComponentsBuilder.queryParam("countries", String.join(",", c)));
@@ -31,4 +32,35 @@ public class NewsCatcherApiUtil {
 
         return uriComponentsBuilder.build().toUri();
     }
+
+    private static String[] getDefaultSources() {
+        return new String[] {
+                "bnnbloomberg.ca",
+                "ctvnews.ca",
+                "citynews.ca",
+                "theglobeandmail.com",
+                "cbc.ca",
+                "globalnews.ca",
+                "tsn.ca",
+                "sportsnet.ca",
+                "thescore.com",
+                "dailymail.co.uk",
+                "bbc.co.uk",
+                "bbc.com",
+                "independent.co.uk",
+                "mirror.co.uk",
+                "thesun.co.uk",
+                "zambianobserver.com",
+                "dailynationzambia.com",
+                "lusakatimes.com",
+                "zambia24.com",
+                "farmersreviewafrica.com",
+                "mwebantu.com",
+                "zambianbusinesstimes.com",
+                "zambianfootball.co.zm",
+                "lusakastar.com",
+                "rainbownewszambia.com"
+        };
+    }
+
 }

@@ -33,7 +33,10 @@ class NewsCatcherApiUtilTest {
         assertEquals("localhost", url.getHost());
         assertEquals("https", url.getScheme());
         assertEquals("/headlines", url.getPath());
-        assertEquals("lang=en", url.getQuery());
+        assertEquals("lang=en&sources=bnnbloomberg.ca,ctvnews.ca,citynews.ca,theglobeandmail.com,cbc.ca,globalnews.ca," +
+                "tsn.ca,sportsnet.ca,thescore.com,dailymail.co.uk,bbc.co.uk,bbc.com,independent.co.uk,mirror.co.uk,thesun.co.uk," +
+                "zambianobserver.com,dailynationzambia.com,lusakatimes.com,zambia24.com,farmersreviewafrica.com,mwebantu.com," +
+                "zambianbusinesstimes.com,zambianfootball.co.zm,lusakastar.com,rainbownewszambia.com", url.getQuery());
     }
 
     @Test
@@ -44,6 +47,9 @@ class NewsCatcherApiUtilTest {
         assertEquals("localhost", url.getHost());
         assertEquals("https", url.getScheme());
         assertEquals("/headlines", url.getPath());
-        assertEquals("lang=en&when=7d&countries=CA,ZM&topic=economics&page_size=23&page=2", url.getQuery());
+        assertEquals("lang=en&sources=bnnbloomberg.ca,ctvnews.ca,citynews.ca,theglobeandmail.com,cbc.ca,globalnews.ca," +
+                "tsn.ca,sportsnet.ca,thescore.com,dailymail.co.uk,bbc.co.uk,bbc.com,independent.co.uk,mirror.co.uk,thesun.co.uk," +
+                "zambianobserver.com,dailynationzambia.com,lusakatimes.com,zambia24.com,farmersreviewafrica.com,mwebantu.com," +
+                "zambianbusinesstimes.com,zambianfootball.co.zm,lusakastar.com,rainbownewszambia.com&when=7d&countries=CA,ZM&topic=economics&page_size=23&page=2", url.getQuery());
     }
 }

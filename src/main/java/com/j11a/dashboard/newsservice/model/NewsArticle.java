@@ -11,6 +11,9 @@ import lombok.NoArgsConstructor;
 public class NewsArticle {
     private String title;
     private String author;
+
+    @JsonProperty("clean_url")
+    private String cleanUrl;
     private String excerpt;
     private String summary;
 

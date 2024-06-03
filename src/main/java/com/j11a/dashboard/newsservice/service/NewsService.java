@@ -37,6 +37,7 @@ public class NewsService {
         log.info("Api response : {} with status {}", response.getStatusCode(), responseBody.get("status").asText("NO STATUS FIELD"));
 
         final NewsResponse newsResponse = objectMapper.convertValue(responseBody, NewsResponse.class);
+
         Optional.ofNullable(responseBody.get("user_input")).ifPresent(userInput ->
                 newsResponse.setFrom(userInput.get("from").asText("1900-01-01 00:00:00")));
 
