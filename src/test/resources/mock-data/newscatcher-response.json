@@ -1,0 +1,47 @@
+{
+  "status": "ok",
+  "total_hits": 78,
+  "page": 44,
+  "total_pages": 5,
+  "page_size": 1,
+  "articles": [
+    {
+      "title": "Avalanche conditions hampering search for 3 missing climbers near Squamish",
+      "author": "The Canadian Press",
+      "published_date": "2024-06-02 23:15:00",
+      "published_date_precision": "full",
+      "link": "https://www.houston-today.com/news/avalanche-conditions-hampering-search-for-3-missing-climbers-near-squamish-7369372",
+      "clean_url": "houston-today.com",
+      "excerpt": "RCMP say mountaineers were supposed to be back from climb in Garibaldi Park already",
+      "summary": "A spokeswoman for Squamish Search and Rescue in British Columbia says an 'active search' is underway for three experienced mountaineers who have been missing since Friday.\nChristy Allan says in an interview that the climbers were last seen Friday morning on Atwell Peak, located on the southern edge of Mount Garibaldi.\nShe says the organization was contacted Friday night by the RCMP to help search for the overdue mountaineers.\nAllan says the climbers, who have not yet been identified, were last seen in 'really complex and remote terrain.'\nShe says members would usually access the region by air and ground, but visibility has been very poor and winter conditions, including avalanche risk, are making it difficult for the team to access the area.\nBut she says members have been able to get to the nearby Elfin Lake shelter and are 'assessing all ways of trying to get into the area.'",
+      "rights": "houston-today.com",
+      "rank": 712544,
+      "topic": "news",
+      "country": "CA",
+      "language": "en",
+      "authors": "The Canadian Press",
+      "media": "https://www.bpmcdn.com/f/files/shared/feeds/gps/2024/06/web1_2024060217064-0075fd8dbf96e646dcab73761e7c6ea3c4f6a12d7a7ee1d02be2befe1326d37d.jpg;w=1170;h=778;mode=crop",
+      "is_opinion": false,
+      "twitter_account": "@",
+      "_score": null,
+      "_id": "10fbf881a83d859c8d38306b08d72249"
+    }
+  ],
+  "user_input": {
+    "lang": [
+      "en"
+    ],
+    "not_lang": null,
+    "countries": [
+      "CA",
+      "ZM"
+    ],
+    "not_countries": null,
+    "page": 1,
+    "size": 1,
+    "sources": null,
+    "not_sources": [],
+    "topic": null,
+    "from": "2024-06-02 22:22:21"
+  }
+}

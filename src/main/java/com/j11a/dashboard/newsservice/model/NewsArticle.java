@@ -4,8 +4,6 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.ZonedDateTime;
-
 @AllArgsConstructor
 @NoArgsConstructor
 @Data
@@ -14,7 +12,7 @@ public class NewsArticle {
     private String author;
     private String excerpt;
     private String summary;
-    private ZonedDateTime publishedDate;
+    private String publishedDate;
     private String url;
     private String country;
     private Topic topic;

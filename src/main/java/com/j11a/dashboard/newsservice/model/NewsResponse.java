@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.ZonedDateTime;
 import java.util.List;
 
 @AllArgsConstructor
@@ -15,6 +14,6 @@ public class NewsResponse {
     private Integer totalPages;
     private Integer currentPage;
     private Integer pageSize;
-    private ZonedDateTime from;
+    private String from;
     private List<NewsArticle> articles;
 }

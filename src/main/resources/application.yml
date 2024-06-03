@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: news-service
+  jackson:
+    mapper:
+      accept-case-insensitive-enums: true
+  devtools:
+    add-properties: false
+newscatcher:
+  host: api.newscatcherapi.com/v2
+  pathLatestHeadlines: latest_headlines
