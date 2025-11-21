@@ -27,7 +27,7 @@ pipeline {
         stage('Build & Test') {
             steps {
                 configFileProvider(
-                    [configFile(fileId: 'fdda197d-25ca-4600-9955-3d0126c1eac6	', variable: 'MAVEN_SETTINGS')]) {
+                    [configFile(fileId: 'fdda197d-25ca-4600-9955-3d0126c1eac6', variable: 'MAVEN_SETTINGS')]) {
                     sh 'mvn -s $MAVEN_SETTINGS clean package'
                 }
             }
@@ -37,7 +37,7 @@ pipeline {
             steps {
                 withSonarQubeEnv('SonarQubeServer') {
                     configFileProvider(
-                        [configFile(fileId: 'fdda197d-25ca-4600-9955-3d0126c1eac6	', variable: 'MAVEN_SETTINGS')]) {
+                        [configFile(fileId: 'fdda197d-25ca-4600-9955-3d0126c1eac6', variable: 'MAVEN_SETTINGS')]) {
                         sh 'mvn -s $MAVEN_SETTINGS sonar:sonar -Dsonar.projectVersion=$env.APP_VERSION'
                     }
                 }
