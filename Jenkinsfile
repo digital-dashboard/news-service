@@ -36,7 +36,10 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('SonarQubeServer') {
-                    sh "mvn sonar:sonar -Dsonar.projectVersion=${env.APP_VERSION}"
+                    configFileProvider(
+                        [configFile(fileId: 'maven-settings', variable: 'MAVEN_SETTINGS')]) {
+                        sh 'mvn -s $MAVEN_SETTINGS sonar:sonar -Dsonar.projectVersion=$env.APP_VERSION'
+                    }
                 }
             }
         }
