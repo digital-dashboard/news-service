@@ -26,14 +26,20 @@ pipeline {
 
         stage('Build & Test') {
             steps {
-                sh 'mvn -B clean verify'
+                configFileProvider(
+                    [configFile(fileId: 'nexus-repo', variable: 'MAVEN_SETTINGS')]) {
+                    sh 'mvn -s $MAVEN_SETTINGS clean package'
+                }
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('SonarQubeServer') {
-                    sh "mvn sonar:sonar -Dsonar.projectVersion=${env.APP_VERSION}"
+                    configFileProvider(
+                        [configFile(fileId: 'nexus-repo', variable: 'MAVEN_SETTINGS')]) {
+                        sh 'mvn -s $MAVEN_SETTINGS sonar:sonar -Dsonar.projectVersion=$env.APP_VERSION'
+                    }
                 }
             }
         }
