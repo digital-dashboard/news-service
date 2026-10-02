@@ -13,7 +13,7 @@ Durable decisions that apply across all phases:
   - Metric prefix: `argus.`
   - Dashboard: uid `argus-observability`
 
-  The public API stays at `/news/v2`. The Swarm service carries a `news-service` network alias until the proxy's target is changed to `argus`.
+  Argus is its own Swarm stack (`argus`), independent of the dashboard. Consumers join the external `argus-overlay-network` and call `http://argus:8080/news/v2/...`.
 - **Platform**: Spring Boot 4.x on Java 21, PostgreSQL, schema managed by Liquibase. Single instance. Built-in Spring features are preferred over hand-rolled code:
   - `@Scheduled` on virtual threads
   - Framework 7 `@Retryable` and `@ConcurrencyLimit`
@@ -27,7 +27,7 @@ Durable decisions that apply across all phases:
   - Actuator, Micrometer and the Observation API
   - Spring Boot's OpenTelemetry support
   - Spring Boot structured logging
-- **Routes**: everything lives under `/news/v2`, which the existing gateway `/news/**` rule already routes.
+- **Routes**: everything lives under `/news/v2` on `http://argus:8080`.
   - Read endpoints:
     - `/articles`, `/articles/{id}`
     - `/headlines`
@@ -42,8 +42,8 @@ Durable decisions that apply across all phases:
     - `POST /feeds`, `PUT /feeds/{id}`, `PATCH /feeds/{id}`, `DELETE /feeds/{id}`
     - `/feeds/{id}/refresh`, `/feeds/refresh`, `/feeds/discover`, `/feeds/import`
     - watch create, update and delete, `/watches/{id}/seen`
-  - API docs are served under `/news/v2/api-docs` and `/news/v2/swagger-ui`, so they're reachable through the gateway.
-  - Actuator stays at `/actuator/*` on the service port. It's reachable on the overlay network for Prometheus and health checks, but **not** routed by the gateway.
+  - API docs are served under `/news/v2/api-docs` and `/news/v2/swagger-ui`, so a gateway routing `/news/**` exposes them too.
+  - Actuator stays at `/actuator/*` on the service port. It's reachable on the overlay networks for Prometheus and health checks; no gateway should route `/actuator`.
 - **Auth**: reads are open. Writes require the `X-Admin-Key` header. A stateless Spring Security filter chain checks it against a required environment-configured key, using constant-time comparison; the key is never logged. A missing or wrong key gives 401 `ADMIN_KEY_REQUIRED`. Actuator health and Prometheus endpoints are permitted without the key.
 - **Response format**:
   - Plain resource bodies, no envelope.
@@ -119,7 +119,7 @@ These are not built by this plan, but the plan depends on them. Each is listed w
   - **`jenkins-shared-lib`: optional image-path prefix.** Image-path construction moves into one shared helper used by all six image-building pipelines. An omitted `dockerRepoPath` keeps the `common` default; an explicitly empty one publishes `<artifactId>:<tag>` with no prefix. The library's tests cover the omitted, empty and set cases. Every existing consumer's image name is unchanged. This is merged before Argus's first pipeline run, as a separate change in that repository.
   - A PostgreSQL database `argus` and user for Argus on the shared Postgres. The `unaccent` extension must be available: either the user may create it, or a DBA pre-creates it.
   - Swarm secrets or environment variables for the database credentials and admin key.
-  - A Swarm service `argus` in the `artemis-dashboard` stack (replacing the commented-out news-service entry). It needs a `news-service` network alias on `artemis-dashboard-network` until the proxy route's target is changed to `http://argus:8080`, attached to `artemis-dashboard-network`, `postgres-overlay-network` and `grafana-overlay-network`, relying on the image's exec-form Java health probe, which calls `/actuator/health/liveness`. The stack must not override it with a wget or curl check, because the image has no shell. This is needed so the gateway, the database, Prometheus and Tempo can reach it.
+  - A standalone Swarm stack `argus` (docker repo `argus/docker-compose.yml`) with service `argus` attached to the external `argus-overlay-network` (consumers join it), `postgres-overlay-network` and `grafana-overlay-network`, relying on the image's exec-form Java health probe, which calls `/actuator/health/liveness`. The stack must not override it with a wget or curl check, because the image has no shell. This is needed so consumers, the database, Prometheus and Tempo can reach it.
 - **Phase 1, observability:**
   - The Prometheus `argus` job and the Promtail `argus` job, applied from this repo's observability config. The live Promtail `docker` job's drop regex becomes `.*(hymenaois|argus).*`, so logs aren't shipped twice. The dashboard gets its own Grafana provider and directory.
   - A PgBouncer `argus` database entry (transaction pooling), and confirmation that the snapshot registry accepts root-level image names.
@@ -175,8 +175,8 @@ Telemetry foundation:
 - [ ] Starting with a missing admin key, one that is too short, or no database settings fails with a clear message.
 - [ ] An unknown route returns `application/problem+json` with a `code`.
 - [ ] No NewsCatcher, RestTemplate, v1 or envelope code or configuration remains, and the local NewsCatcher key is removed.
-- [ ] Every identifier in the Identity decision reads `argus`: the artifact, package root, application name, Sonar key, the image `argus` (no repository path), and `service.name`. The gateway's `/news/**` route reaches the service through the `news-service` alias.
-- [ ] `/actuator/prometheus` serves `http_server_requests_seconds_bucket`, JVM and HikariCP series without an admin key. `/actuator` isn't reachable through `/news/**`.
+- [ ] Every identifier in the Identity decision reads `argus`: the artifact, package root, application name, Sonar key, the image `argus` (no repository path), and `service.name`. Consumers on `argus-overlay-network` reach it at `http://argus:8080`.
+- [ ] `/actuator/prometheus` serves `http_server_requests_seconds_bucket`, JVM and HikariCP series without an admin key. `/actuator` is not under `/news/**`, so a gateway routing `/news/**` never exposes it.
 - [ ] A request produces a trace in Tempo with `service.name=argus`, and the request's log line in Loki carries the same `traceId` and links to it.
 - [ ] Log output is valid JSON with `level`, `logger_name`, `traceId` and `@timestamp` (asserted by a test).
 - [ ] The dashboard validator passes on the skeleton and fails when a panel references an unpublished metric (asserted by a test of the validator).
@@ -594,5 +594,5 @@ Finish the cross-cutting work that the earlier phases have been building up:
 - [ ] The health endpoint shows the failing feeds, and liveness and readiness stay UP while every feed fails.
 - [ ] Every meter in the catalogue is referenced by at least one panel, and every panel query uses a catalogued or allow-listed metric. The validator enforces both directions.
 - [ ] The final dashboard, pushed to Grafana through the MCP, renders every panel with live data after a day of real polling. The `source`/`feed` variables filter correctly, a trace id in the Logs panel opens the trace in Tempo, and "Logs for this span" opens the matching Loki lines.
-- [ ] Swagger UI loads through the gateway at `/news/v2/swagger-ui`. The OpenAPI document lists every endpoint with its error responses and the `X-Admin-Key` scheme.
+- [ ] Swagger UI loads at `/news/v2/swagger-ui`. The OpenAPI document lists every endpoint with its error responses and the `X-Admin-Key` scheme.
 - [ ] The observability README has been followed end-to-end against the docker/grafana stack, with no undocumented step.

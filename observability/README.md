@@ -12,7 +12,7 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 
 ## Prerequisites outside this repo
 
-- Swarm service `argus` (a stack prefix such as `argus_argus` is fine) attached to `artemis-dashboard-network` with the alias `news-service`, `postgres-overlay-network` and `grafana-overlay-network`.
+- A standalone Swarm stack `argus` (docker repo `argus/docker-compose.yml`; the service becomes `argus_argus`, which the jobs match) attached to `argus-overlay-network`, `postgres-overlay-network` and `grafana-overlay-network`. Create the consumer network once with `docker network create --driver overlay --attachable argus-overlay-network`; other services join it to call `http://argus:8080`.
 - A PgBouncer `argus` entry in **transaction** pooling mode. Argus keeps no session state.
 - A database `argus` whose user may run `CREATE EXTENSION IF NOT EXISTS unaccent` (or a DBA creates the extension first).
 - Swarm secrets `argus_db_password` and `argus_admin_key`, and the environment variables `ARGUS_DB_URL` and `ARGUS_DB_USERNAME`.
@@ -37,7 +37,7 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 
 ## Design decisions
 
-- **Task discovery, one mechanism per job.** Prometheus finds Argus through the Swarm tasks of the service, so the `news-service` network alias does not matter.
+- **Task discovery, one mechanism per job.** Prometheus finds Argus through the Swarm tasks of the service, and keeps only the `grafana-overlay-network` address.
 - **Network keep rule.** Argus is on three networks and task discovery yields one target per network, so the job keeps only `grafana-overlay-network`. Otherwise `up` shows two dead targets per task.
 - **`traceId` is never a Loki label.** It is unbounded. Promtail extracts it, and Grafana's derived field recovers it from the log line. Only `level` is promoted.
 - **Explicit `@timestamp`.** The Promtail job extracts `"@timestamp"` and uses it, so a delayed batch does not distort the log volume.

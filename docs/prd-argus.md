@@ -195,16 +195,16 @@ The service is renamed from news-service to **Argus** everywhere a name is chose
 | Maven artifact / Spring application name | `argus` |
 | Base Java package | `com.j11a.argus` |
 | Docker image | `argus` at the registry root, with no repository path (snapshot registry, via the shared pipeline) |
-| Swarm service / container DNS name | `argus`, plus a temporary `news-service` network alias |
+| Swarm stack, service and DNS name | stack `argus`, service `argus`, reached as `argus` on `argus-overlay-network` |
 | Sonar project key | `argus` |
 | PostgreSQL database and user | `argus` |
 | OpenTelemetry `service.name` | `argus` |
 | Metric prefix | `argus.` (Prometheus `argus_*`) |
 | Prometheus and Promtail jobs | `argus` |
 | Grafana dashboard | "Argus — Observability", uid `argus-observability` |
-| Public API | unchanged: `/news/v2/...`, still reached through the gateway's `/news/**` route |
+| Public API | `/news/v2/...` at `http://argus:8080` |
 
-The gateway currently routes `/news/**` to the host `news-service`. The `argus` service carries a `news-service` network alias on the stack network, so the route keeps working without touching the proxy. Changing the proxy's target to `argus` and then removing the alias is a one-line follow-up in the proxy repository. The git repository and its directory keep their current name; renaming the remote is the owner's call.
+Argus runs as its own Swarm stack (`argus`, stack file in the docker repo at `argus/docker-compose.yml`), independent of the dashboard, because other services will use it too. Consumers join the external `argus-overlay-network` and call `http://argus:8080/news/v2/...`. The dashboard's existing proxy route (`/news/**` to `news-service:8080`) no longer reaches it; a gateway that should front Argus joins `argus-overlay-network` and routes to `http://argus:8080`. The git repository and its directory keep their current name; renaming the remote is the owner's call.
 
 ### Platform and dependencies
 
@@ -405,7 +405,7 @@ The code is organised by feature (feeds, articles, stories, watches, ingestion, 
 - The polling orchestrator reads the enabled feeds from the database at the start of every run, with no caching. Feeds added, edited, disabled or deleted through the API are picked up by the next poll without a restart. A newly created feed is also ingested right after creation, so its articles appear without waiting for the next scheduled poll.
 - Required Postgres extension: `unaccent`.
 
-### API contract (`/news/v2`, routed by the existing gateway rule for `/news/**`)
+### API contract (`/news/v2` on `http://argus:8080`)
 
 Reads need no credentials. Writes need the `X-Admin-Key` header. All timestamps are ISO-8601 UTC and all field names are camelCase.
 
@@ -645,7 +645,7 @@ Spring Cloud Config is **not** adopted. Configuration stays local, overridden by
 
 - Grafana alert rules. Thresholds are shown on dashboard panels only; alerting is a later piece of work.
 - Applying the Prometheus and Promtail config to the running stack, and deploying the dashboard through provisioning. The repository supplies the files and the instructions; applying them is done in the docker/grafana stack.
-- Any change to frontend-app, weather-service or the proxy/gateway. The `news-service` network alias keeps the existing proxy route working; retargeting it to `argus` is a later one-line follow-up. The gateway's existing `/news/**` route already reaches `/news/v2`. The redesigned frontend consumes the new API in its own project.
+- Any change to frontend-app, weather-service or the proxy/gateway. Argus is a standalone stack, so the dashboard's old `/news/**` route stops working; the redesigned frontend and any gateway that fronts Argus are wired up in their own projects.
 - Keeping v1 compatible. `/news/v1/headlines` and the `ApiResponse` envelope are removed, not deprecated.
 - User accounts, per-person watches or per-person read state. The service is single-household.
 - External push notifications (webhooks, ntfy, Discord, email, mobile push). Only the pull API and the SSE stream are in scope.
