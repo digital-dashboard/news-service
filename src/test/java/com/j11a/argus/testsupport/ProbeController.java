@@ -4,8 +4,10 @@ import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,6 +26,11 @@ public class ProbeController {
     private static final Logger LOG = LoggerFactory.getLogger(ProbeController.class);
 
     public record ProbeRequest(@NotBlank String name) {
+    }
+
+    public enum Mode { FAST, SLOW }
+
+    public record ModeRequest(Mode mode) {
     }
 
     @GetMapping
@@ -45,6 +52,21 @@ public class ProbeController {
     @GetMapping("/api-error")
     public String apiError() {
         throw new ApiException(ErrorCode.FEED_NOT_FOUND, "no such feed");
+    }
+
+    @GetMapping("/api-error-props")
+    public String apiErrorWithProperties() {
+        throw new ApiException(ErrorCode.FEED_URL_CONFLICT, "dup", Map.of("existingFeedId", 7));
+    }
+
+    @GetMapping("/denied")
+    public String denied() {
+        throw new AccessDeniedException("denied");
+    }
+
+    @PostMapping("/mode")
+    public String mode(@RequestBody ModeRequest request) {
+        return request.mode().name();
     }
 
     @GetMapping("/boom")

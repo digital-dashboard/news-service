@@ -3,6 +3,7 @@ package com.j11a.argus.observability;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationFilter;
 import io.micrometer.observation.ObservationPredicate;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.server.observation.ServerRequestObservationContext;
@@ -34,5 +35,28 @@ class ObservabilityConfigTest {
     @Test
     void keepsObservationsThatAreNotServerRequests() {
         assertThat(predicate.test("argus.fetch", new Observation.Context())).isTrue();
+    }
+
+    @Test
+    void clientUrlsLoseTheirQueryStringAndUserInfo() {
+        ObservationFilter filter = new ObservabilityConfig().clientUrlsLoseTheirQueryString();
+        org.springframework.http.client.observation.ClientRequestObservationContext context =
+                new org.springframework.http.client.observation.ClientRequestObservationContext(
+                        new org.springframework.mock.http.client.MockClientHttpRequest(
+                                org.springframework.http.HttpMethod.GET,
+                                java.net.URI.create("https://user:pw@feeds.example.test:8443/a/b.xml?token=hunter2")));
+
+        filter.map(context);
+
+        assertThat(context.getHighCardinalityKeyValue("http.url").getValue())
+                .isEqualTo("https://feeds.example.test:8443/a/b.xml");
+    }
+
+    @Test
+    void otherObservationsPassThroughTheUrlFilterUntouched() {
+        ObservationFilter filter = new ObservabilityConfig().clientUrlsLoseTheirQueryString();
+        Observation.Context context = new Observation.Context();
+
+        assertThat(filter.map(context)).isSameAs(context);
     }
 }

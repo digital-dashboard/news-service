@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.j11a.argus.config.WebMvcConfig;
 import com.j11a.argus.security.SecurityConfig;
+import com.j11a.argus.testsupport.AdminKeys;
 import com.j11a.argus.testsupport.ProbeController;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,7 +24,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(ProbeController.class)
-@Import({GlobalExceptionHandler.class, SecurityConfig.class, WebMvcConfig.class})
+@Import({GlobalExceptionHandler.class, SecurityConfig.class, WebMvcConfig.class, AdminKeys.SliceProperties.class})
 @ExtendWith(OutputCaptureExtension.class)
 class GlobalExceptionHandlerTest {
 
@@ -51,7 +52,7 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void methodNotAllowedHasCodeAndAllowHeader() throws Exception {
-        mockMvc.perform(put(PROBE))
+        mockMvc.perform(put(PROBE).header(AdminKeys.HEADER, AdminKeys.VALID))
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(header().exists("Allow"))
                 .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"));
@@ -69,7 +70,7 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void validationFailureListsFieldErrors() throws Exception {
-        mockMvc.perform(post(PROBE).contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"\"}"))
+        mockMvc.perform(post(PROBE).header(AdminKeys.HEADER, AdminKeys.VALID).contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.errors[0].field").value("name"))
@@ -78,14 +79,14 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void unreadableBodyIsBadRequest() throws Exception {
-        mockMvc.perform(post(PROBE).contentType(MediaType.APPLICATION_JSON).content("{"))
+        mockMvc.perform(post(PROBE).header(AdminKeys.HEADER, AdminKeys.VALID).contentType(MediaType.APPLICATION_JSON).content("{"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
     }
 
     @Test
     void unsupportedMediaTypeHasItsOwnCode() throws Exception {
-        mockMvc.perform(post(PROBE).contentType(MediaType.TEXT_PLAIN).content("x"))
+        mockMvc.perform(post(PROBE).header(AdminKeys.HEADER, AdminKeys.VALID).contentType(MediaType.TEXT_PLAIN).content("x"))
                 .andExpect(status().isUnsupportedMediaType())
                 .andExpect(jsonPath("$.code").value("UNSUPPORTED_MEDIA_TYPE"));
     }
@@ -115,5 +116,30 @@ class GlobalExceptionHandlerTest {
 
         assertThat(body).doesNotContain(ProbeController.SECRET_DETAIL).doesNotContain("stackTrace");
         assertThat(output).contains(ProbeController.SECRET_DETAIL);
+    }
+
+    @Test
+    void apiExceptionPropertiesAreCopiedOntoTheProblem() throws Exception {
+        mockMvc.perform(get(PROBE + "/api-error-props"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("FEED_URL_CONFLICT"))
+                .andExpect(jsonPath("$.existingFeedId").value(7));
+    }
+
+    @Test
+    void unknownEnumValueIsValidationFailedNamingTheField() throws Exception {
+        mockMvc.perform(post(PROBE + "/mode").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"mode\":\"WARP\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[0].field").value("mode"));
+    }
+
+    @Test
+    void bodyOfTheWrongShapeWithoutAFieldIsBadRequest() throws Exception {
+        mockMvc.perform(post(PROBE + "/mode").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("[]"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
     }
 }

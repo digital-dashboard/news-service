@@ -59,4 +59,14 @@ class MetricCatalogueTest {
 
         assertThat(spec.prometheusSeries()).containsExactly("argus_feeds_active");
     }
+
+    @Test
+    void cataloguesThePhaseTwoIngestMeters() {
+        assertThat(MetricCatalogue.ALL).extracting(MeterSpec::name).containsExactlyInAnyOrder(
+                MetricNames.FETCH, MetricNames.INGEST, MetricNames.FETCH_SIZE, MetricNames.INGEST_ENTRIES,
+                MetricNames.PARSE_MISSING);
+        assertThat(MetricCatalogue.ALL).filteredOn(spec -> spec.name().equals(MetricNames.FETCH_SIZE))
+                .singleElement().satisfies(spec -> assertThat(spec.prometheusBase())
+                        .isEqualTo("argus_fetch_size_bytes"));
+    }
 }

@@ -7,6 +7,12 @@ public final class MetricNames {
 
     public static final String PREFIX = "argus";
 
+    public static final String FETCH = "argus.fetch";
+    public static final String INGEST = "argus.ingest";
+    public static final String FETCH_SIZE = "argus.fetch.size";
+    public static final String INGEST_ENTRIES = "argus.ingest.entries";
+    public static final String PARSE_MISSING = "argus.parse.missing";
+
     private MetricNames() {
     }
 

@@ -1,3 +1,9 @@
+spring:
+  jpa:
+    hibernate:
+      # Entities and changesets must not drift apart.
+      ddl-auto: validate
+
 argus:
   admin:
     key: integration-test-admin-key-0123456789abcdef
