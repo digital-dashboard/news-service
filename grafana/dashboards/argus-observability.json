@@ -1,7 +1,7 @@
 {
   "uid": "argus-observability",
   "title": "Argus — Observability",
-  "description": "Argus service health: HTTP RED metrics, JVM, PostgreSQL and HikariCP, container resources, Tempo traces and Loki logs. Version-controlled in grafana/dashboards and validated by the Argus dashboard tests.",
+  "description": "Argus service health: HTTP RED metrics, the ingestion pipeline, data quality, JVM, PostgreSQL and HikariCP, container resources, Tempo traces and Loki logs. Version-controlled in grafana/dashboards and validated by the Argus dashboard tests.",
   "tags": [
     "argus",
     "artemis",
@@ -464,7 +464,7 @@
       "id": 30,
       "type": "timeseries",
       "title": "Fetch outcomes",
-      "description": "Fetches per second by outcome and reason. Failures carry the reason tag (for example timeout, http_status, io); successful fetches have reason none. Empty until the first feed is refreshed.",
+      "description": "Fetches per second by outcome and reason. Failures carry the reason tag (for example timeout, http_status, io); successful fetches have reason none. Empty until the first feed is added or refreshed.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -521,7 +521,7 @@
       "id": 31,
       "type": "timeseries",
       "title": "Fetch p95 by source",
-      "description": "95th percentile time to fetch a feed, per source. Includes failed fetches. Empty until the first fetch.",
+      "description": "95th percentile time to fetch a feed, per source. Includes failed fetches. Empty until the first feed is added or refreshed.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -578,7 +578,7 @@
       "id": 32,
       "type": "timeseries",
       "title": "Ingest p95 by source",
-      "description": "95th percentile of a whole ingest run (fetch, parse and persist), per source.",
+      "description": "95th percentile of an ingest run per source. A refresh covers fetch, parse and persist; the first ingest after POST /feeds covers persist only.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -635,7 +635,7 @@
       "id": 33,
       "type": "timeseries",
       "title": "Bytes per fetch",
-      "description": "Mean response size per fetch by source, from the fetch size summary. The denominator is clamped so the panel stays defined when nothing is fetched.",
+      "description": "Mean response size per successful fetch, by source, from the fetch size summary. The denominator is clamped so the panel stays defined when nothing is fetched.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"

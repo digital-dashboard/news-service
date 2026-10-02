@@ -1,5 +1,6 @@
-package com.j11a.argus.feed;
+package com.j11a.argus.feed.api;
 
+import com.j11a.argus.feed.Topic;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;

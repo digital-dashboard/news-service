@@ -46,7 +46,7 @@ public class SecurityConfig {
                         .requestMatchers(EndpointRequest.toAnyEndpoint()).denyAll()
                         .requestMatchers(WRITES)
                         .hasAuthority(AdminKeyFilter.ADMIN_AUTHORITY)
-                        // Unknown routes must reach the 404 problem response, not a 401.
+                        // Unknown read routes must reach the 404 problem response, not a 401.
                         .anyRequest().permitAll());
         return http.build();
     }

@@ -59,4 +59,19 @@ class ObservabilityConfigTest {
 
         assertThat(filter.map(context)).isSameAs(context);
     }
+
+    @Test
+    void withoutQueryKeepsPercentEscapesInThePath() {
+        String url = ObservabilityConfig.withoutQuery(java.net.URI.create("https://feeds.example.test/a%20b/c.xml?t=1"));
+
+        assertThat(url).isEqualTo("https://feeds.example.test/a%20b/c.xml");
+    }
+
+    @Test
+    void withoutQueryKeepsTheBracketsOfAnIpv6Host() {
+        assertThat(ObservabilityConfig.withoutQuery(java.net.URI.create("http://[::1]:8080/feed?token=x")))
+                .isEqualTo("http://[::1]:8080/feed");
+        assertThat(ObservabilityConfig.withoutQuery(java.net.URI.create("http://[2001:db8::1]/feed")))
+                .isEqualTo("http://[2001:db8::1]/feed");
+    }
 }

@@ -2,13 +2,12 @@ package com.j11a.argus.feed.fetch;
 
 import com.j11a.argus.feed.fetch.FetchResult.Failed;
 import com.j11a.argus.feed.fetch.FetchResult.Fetched;
+import com.j11a.argus.url.HttpUrls;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketTimeoutException;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.net.http.HttpTimeoutException;
-import java.util.Locale;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
@@ -19,7 +18,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 /**
- * Downloads a feed. Redirects are followed here, not by the HTTP client, so every hop is validated and reported.
+ * Downloads a feed. Redirects are followed here, not by the HTTP client, so every hop is validated.
  * Query strings can carry tokens, so they are never logged or returned in failures.
  */
 @Component
@@ -53,9 +52,10 @@ public class FeedFetcher {
 
     public FetchResult fetch(URI url) {
         URI current = url;
-        boolean permanentRedirect = false;
+        URI permanentTarget = null;
+        boolean permanentChain = true;
         for (int redirects = 0; ; redirects++) {
-            if (!isHttp(current)) {
+            if (!HttpUrls.isHttp(current) || HttpUrls.hasUserInfo(current)) {
                 return new Failed(FetchFailureReason.INVALID_URL, null);
             }
             Step step;
@@ -68,7 +68,7 @@ public class FeedFetcher {
                 return rejected.failure();
             }
             if (step instanceof Body body) {
-                return new Fetched(body.bytes(), body.contentType(), current, permanentRedirect);
+                return new Fetched(body.bytes(), body.contentType(), current, permanentTarget);
             }
             Redirect redirect = (Redirect) step;
             if (redirect.location() == null) {
@@ -77,10 +77,13 @@ public class FeedFetcher {
             if (redirects >= properties.maxRedirects()) {
                 return new Failed(FetchFailureReason.REDIRECT_LIMIT, redirect.status());
             }
-            permanentRedirect |= PERMANENT_REDIRECT_STATUSES.contains(redirect.status());
-            URI next = resolve(current, redirect.location());
+            URI next = HttpUrls.resolve(current, redirect.location()).orElse(null);
             if (next == null) {
                 return new Failed(FetchFailureReason.INVALID_URL, null);
+            }
+            permanentChain &= PERMANENT_REDIRECT_STATUSES.contains(redirect.status());
+            if (permanentChain) {
+                permanentTarget = next;
             }
             current = next;
         }
@@ -124,21 +127,6 @@ public class FeedFetcher {
                 throw new HttpTimeoutException("read timeout");
             }
             throw e;
-        }
-    }
-
-    private static boolean isHttp(URI uri) {
-        String scheme = uri.getScheme();
-        boolean httpScheme = scheme != null && ("http".equals(scheme.toLowerCase(Locale.ROOT))
-                || "https".equals(scheme.toLowerCase(Locale.ROOT)));
-        return httpScheme && uri.getHost() != null;
-    }
-
-    private static @Nullable URI resolve(URI current, String location) {
-        try {
-            return current.resolve(new URI(location.strip()));
-        } catch (URISyntaxException | IllegalArgumentException e) {
-            return null;
         }
     }
 

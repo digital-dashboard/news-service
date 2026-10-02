@@ -2,7 +2,6 @@ package com.j11a.argus.observability;
 
 import java.util.Set;
 
-/** Every custom meter name and tag key. */
 public final class MetricNames {
 
     public static final String PREFIX = "argus";

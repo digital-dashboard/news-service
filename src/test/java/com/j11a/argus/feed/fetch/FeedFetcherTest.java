@@ -68,7 +68,7 @@ class FeedFetcherTest {
             assertThat(new String(fetched.body())).isEqualTo("<rss/>");
             assertThat(fetched.contentType()).isEqualTo(RSS);
             assertThat(fetched.finalUrl()).isEqualTo(URI.create(server.baseUrl() + "/feed"));
-            assertThat(fetched.permanentRedirect()).isFalse();
+            assertThat(fetched.permanentTarget()).isNull();
         });
     }
 
@@ -124,14 +124,17 @@ class FeedFetcherTest {
     }
 
     @Test
-    void slowlyDrippedBodyEndsInATimeoutWithinRoughlyTheReadTimeout() {
-        server.drip("/slow", RSS, FeedStubServer.utf8("<rss>slow</rss>"), 1, READ_TIMEOUT.toMillis() * 3);
+    void aBodyDrippedFasterThanTheReadTimeoutStillEndsInATimeoutAtTheTotalDeadline() {
+        byte[] body = FeedStubServer.utf8("<rss>dripping slowly, one byte at a time</rss>");
+        long pauseMillis = READ_TIMEOUT.toMillis() / 3;
+        assertThat(pauseMillis * body.length).isGreaterThan(READ_TIMEOUT.multipliedBy(2).toMillis());
+        server.drip("/drip", RSS, body, 1, pauseMillis);
         long start = System.nanoTime();
 
-        FetchResult result = fetch("/slow");
+        FetchResult result = fetch("/drip");
 
         assertFailed(result, FetchFailureReason.TIMEOUT, null);
-        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(READ_TIMEOUT.multipliedBy(4));
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(READ_TIMEOUT.multipliedBy(2));
     }
 
     @Test
@@ -154,21 +157,21 @@ class FeedFetcherTest {
     }
 
     @Test
-    void temporaryRedirectIsFollowedAndReportsTheFinalUrlWithoutThePermanentFlag() {
+    void temporaryRedirectIsFollowedAndReportsTheFinalUrlWithoutAPermanentTarget() {
         server.redirect("/old", 302, "/new").serve("/new", 200, RSS, FeedStubServer.utf8("<rss/>"));
 
         FetchResult result = fetch("/old");
 
         assertThat(result).isInstanceOfSatisfying(Fetched.class, fetched -> {
             assertThat(fetched.finalUrl()).isEqualTo(URI.create(server.baseUrl() + "/new"));
-            assertThat(fetched.permanentRedirect()).isFalse();
+            assertThat(fetched.permanentTarget()).isNull();
         });
         assertThat(server.requestsTo("/new")).hasSize(1);
     }
 
     @ParameterizedTest
     @ValueSource(ints = {301, 308})
-    void permanentRedirectsAreFollowedAndFlagged(int status) {
+    void permanentRedirectsAreFollowedAndReportTheTarget(int status) {
         server.redirect("/old", status, server.baseUrl() + "/new")
                 .serve("/new", 200, RSS, FeedStubServer.utf8("<rss/>"));
 
@@ -176,27 +179,75 @@ class FeedFetcherTest {
 
         assertThat(result).isInstanceOfSatisfying(Fetched.class, fetched -> {
             assertThat(fetched.finalUrl()).isEqualTo(URI.create(server.baseUrl() + "/new"));
-            assertThat(fetched.permanentRedirect()).isTrue();
+            assertThat(fetched.permanentTarget()).isEqualTo(URI.create(server.baseUrl() + "/new"));
         });
     }
 
     @ParameterizedTest
     @ValueSource(ints = {303, 307})
-    void otherRedirectStatusesAreFollowedWithoutTheFlag(int status) {
+    void otherRedirectStatusesAreFollowedWithoutAPermanentTarget(int status) {
         server.redirect("/old", status, "/new").serve("/new", 200, RSS, FeedStubServer.utf8("<rss/>"));
 
         assertThat(fetch("/old")).isInstanceOfSatisfying(Fetched.class,
-                fetched -> assertThat(fetched.permanentRedirect()).isFalse());
+                fetched -> assertThat(fetched.permanentTarget()).isNull());
     }
 
     @Test
-    void permanentFlagSticksWhenALaterHopIsTemporary() {
+    void permanentTargetStopsAtTheFirstTemporaryHopOfTheLeadingChain() {
         server.redirect("/a", 301, "/b").redirect("/b", 302, "/c").serve("/c", 200, RSS, FeedStubServer.utf8("<rss/>"));
 
         assertThat(fetch("/a")).isInstanceOfSatisfying(Fetched.class, fetched -> {
-            assertThat(fetched.permanentRedirect()).isTrue();
+            assertThat(fetched.permanentTarget()).isEqualTo(URI.create(server.baseUrl() + "/b"));
             assertThat(fetched.finalUrl().getPath()).isEqualTo("/c");
         });
+    }
+
+    @Test
+    void aTemporaryFirstHopMeansNoPermanentTargetEvenIfALaterHopIsPermanent() {
+        server.redirect("/a", 302, "/b").redirect("/b", 301, "/c").serve("/c", 200, RSS, FeedStubServer.utf8("<rss/>"));
+
+        assertThat(fetch("/a")).isInstanceOfSatisfying(Fetched.class, fetched -> {
+            assertThat(fetched.permanentTarget()).isNull();
+            assertThat(fetched.finalUrl().getPath()).isEqualTo("/c");
+        });
+    }
+
+    @Test
+    void mixedPermanentStatusesKeepTheChainUnbroken() {
+        server.redirect("/a", 301, "/b").redirect("/b", 308, "/c").serve("/c", 200, RSS, FeedStubServer.utf8("<rss/>"));
+
+        assertThat(fetch("/a")).isInstanceOfSatisfying(Fetched.class, fetched ->
+                assertThat(fetched.permanentTarget()).isEqualTo(URI.create(server.baseUrl() + "/c")));
+    }
+
+    @Test
+    void relativeLocationAgainstAnEmptyPathRequestsTheRootedUrl() {
+        server.redirect("/", 302, "feed.xml").serve("/feed.xml", 200, RSS, FeedStubServer.utf8("<rss/>"));
+
+        FetchResult result = fetcher(5).fetch(URI.create(server.baseUrl()));
+
+        assertThat(result).isInstanceOfSatisfying(Fetched.class, fetched ->
+                assertThat(fetched.finalUrl()).isEqualTo(URI.create(server.baseUrl() + "/feed.xml")));
+        assertThat(server.requestsTo("/feed.xml")).hasSize(1);
+    }
+
+    @Test
+    void userInfoOnTheInitialUrlIsInvalidAndNoRequestIsMade() {
+        URI withCredentials = URI.create(server.baseUrl().replace("http://", "http://user:pass@") + "/feed");
+
+        FetchResult result = fetcher(5).fetch(withCredentials);
+
+        assertFailed(result, FetchFailureReason.INVALID_URL, null);
+        assertThat(server.requests()).isEmpty();
+    }
+
+    @Test
+    void userInfoOnARedirectHopIsInvalidAndThatHopIsNeverRequested() {
+        String target = server.baseUrl().replace("http://", "http://user:pass@") + "/secret";
+        server.redirect("/bounce", 302, target).serve("/secret", 200, RSS, FeedStubServer.utf8("<rss/>"));
+
+        assertFailed(fetch("/bounce"), FetchFailureReason.INVALID_URL, null);
+        assertThat(server.requests()).hasSize(1);
     }
 
     @Test

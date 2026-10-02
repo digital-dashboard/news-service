@@ -1,13 +1,14 @@
 package com.j11a.argus.testsupport;
 
 import com.j11a.argus.config.ArgusProperties;
+import com.j11a.argus.security.AdminKeyFilter;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 
 /** Dummy admin key. It is the value application-it.yml gives the integration tests. */
 public final class AdminKeys {
 
-    public static final String HEADER = "X-Admin-Key";
+    public static final String HEADER = AdminKeyFilter.HEADER;
     public static final String VALID = "integration-test-admin-key-0123456789abcdef";
 
     private AdminKeys() {

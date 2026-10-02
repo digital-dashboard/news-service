@@ -1,4 +1,4 @@
-package com.j11a.argus.feed;
+package com.j11a.argus.feed.api;
 
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.IngestReport;

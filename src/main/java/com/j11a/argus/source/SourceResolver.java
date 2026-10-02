@@ -2,12 +2,15 @@ package com.j11a.argus.source;
 
 import com.google.common.net.InetAddresses;
 import com.google.common.net.InternetDomainName;
+import com.j11a.argus.url.HttpUrls;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 
 public final class SourceResolver {
+
+    /** source.key is varchar(255); real hosts are at most 253 characters, so this only guards hostile input. */
+    static final int MAX_KEY_LENGTH = 255;
 
     private SourceResolver() {
     }
@@ -17,21 +20,12 @@ public final class SourceResolver {
         if (host == null) {
             host = normalise(feedUrl.getHost());
         }
-        return host == null ? "" : registrableDomain(host);
+        String key = host == null ? "" : registrableDomain(host);
+        return key.length() > MAX_KEY_LENGTH ? key.substring(0, MAX_KEY_LENGTH) : key;
     }
 
     private static @Nullable String hostOf(@Nullable String link) {
-        if (link == null || link.isBlank()) {
-            return null;
-        }
-        try {
-            URI uri = new URI(link.strip());
-            String scheme = uri.getScheme();
-            boolean http = "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
-            return http ? normalise(uri.getHost()) : null;
-        } catch (URISyntaxException e) {
-            return null;
-        }
+        return HttpUrls.parseHttp(link).map(uri -> normalise(uri.getHost())).orElse(null);
     }
 
     private static @Nullable String normalise(@Nullable String host) {

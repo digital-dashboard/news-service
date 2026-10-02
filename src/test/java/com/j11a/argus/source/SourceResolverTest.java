@@ -70,4 +70,13 @@ class SourceResolverTest {
     void hostlessFeedUrlGivesAnEmptyKey() {
         assertThat(SourceResolver.keyFor(null, URI.create("file:///tmp/x"))).isEmpty();
     }
+
+    @Test
+    void anOverlongHostIsCutToTheColumnWidth() {
+        String host = "a".repeat(300) + ".example.test";
+
+        assertThat(keyFor(null, "https://" + host + "/f")).hasSize(SourceResolver.MAX_KEY_LENGTH);
+        assertThat(keyFor("https://" + host + "/", "https://feeds.example.test/f"))
+                .hasSize(SourceResolver.MAX_KEY_LENGTH);
+    }
 }

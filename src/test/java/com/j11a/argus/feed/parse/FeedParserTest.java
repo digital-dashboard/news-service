@@ -138,6 +138,14 @@ class FeedParserTest {
     }
 
     @Test
+    void entryLinksThatAreNotHttpAreDroppedButTheEntryKeepsItsGuid() throws Exception {
+        ParsedFeed feed = parse("unsafe-link.xml");
+
+        assertThat(feed.entries()).extracting(ParsedEntry::link).containsOnlyNulls();
+        assertThat(feed.entries()).extracting(ParsedEntry::guid).containsExactly("unsafe-1", "unsafe-2");
+    }
+
+    @Test
     void relativeLinksResolveAgainstTheFeedUrlWhenTheFeedHasNoSiteLink() throws Exception {
         String xml = "<rss version=\"2.0\"><channel><title>t</title><description>d</description>"
                 + "<item><title>a</title><link>/x/1</link></item></channel></rss>";
@@ -208,6 +216,21 @@ class FeedParserTest {
         assertThat(feed.title()).isEqualTo("Café Dispatch");
         assertThat(feed.entries().get(0).title()).isEqualTo("The café reopens – “at last”");
         assertThat(feed.entries().get(0).excerpt()).isEqualTo("Fresh bread and a curly ’ quote.");
+    }
+
+    @Test
+    void utf8ByteOrderMarkBeforeAWindows1252FallbackStillParses() throws Exception {
+        byte[] windows1252Bytes = new String(Fixtures.feed("wrong-encoding.xml"), StandardCharsets.UTF_8)
+                .getBytes(Charset.forName("windows-1252"));
+        byte[] withBom = new byte[windows1252Bytes.length + 3];
+        withBom[0] = (byte) 0xEF;
+        withBom[1] = (byte) 0xBB;
+        withBom[2] = (byte) 0xBF;
+        System.arraycopy(windows1252Bytes, 0, withBom, 3, windows1252Bytes.length);
+
+        ParsedFeed feed = parser.parse(withBom, FEED_URL, null);
+
+        assertThat(feed.title()).isEqualTo("Café Dispatch");
     }
 
     @Test

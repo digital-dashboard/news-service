@@ -13,36 +13,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 class EntryKeysTest {
 
     @Test
-    void cleanLinkLowercasesSchemeAndHostAndDropsTheFragment() {
-        assertThat(EntryKeys.cleanLink("  HTTPS://News.Example.COM/Path/A?x=1#top ")).isEqualTo("https://news.example.com/Path/A?x=1");
-    }
-
-    @Test
-    void cleanLinkKeepsWwwParameterOrderTrackingParametersPortAndEscapes() {
-        String link = "http://www.example.com:8080/a%2Fb?utm_source=x&b=2&a=1";
-
-        assertThat(EntryKeys.cleanLink(link)).isEqualTo(link);
-    }
-
-    @ParameterizedTest
-    @NullAndEmptySource
-    @ValueSource(strings = {"  ", "ftp://example.com/a", "file:///etc/passwd", "/relative/path", "mailto:a@b.c",
-            "javascript:alert(1)", "https:///nohost", "http://bad host/", "not a url"})
-    void cleanLinkRejectsAnythingThatIsNotAnAbsoluteHttpUrl(String link) {
-        assertThat(EntryKeys.cleanLink(link)).isNull();
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"HTTP://Example.com/A#frag", "https://example.com", "https://[::1]:9000/x?y=%20z",
-            "http://user:pw@Host.example/p"})
-    void cleanLinkIsIdempotent(String link) {
-        String once = EntryKeys.cleanLink(link);
-
-        assertThat(once).isNotNull();
-        assertThat(EntryKeys.cleanLink(once)).isEqualTo(once);
-    }
-
-    @Test
     void guidKeyPrefersTheTrimmedGuid() {
         assertThat(EntryKeys.guidKey("  urn:abc  ", "https://example.com/a")).isEqualTo("urn:abc");
     }

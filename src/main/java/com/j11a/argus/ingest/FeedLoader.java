@@ -40,12 +40,13 @@ public class FeedLoader {
     }
 
     public Loaded load(URI url, String sourceKey) {
-        FetchResult result = telemetry.fetch(sourceKey, () -> fetcher.fetch(url));
-        if (result instanceof FetchResult.Failed failed) {
-            return new Loaded.Failed(failed.reason().tag());
-        }
-        Instant fetchedAt = clock.instant();
-        FetchResult.Fetched fetched = (FetchResult.Fetched) result;
+        return switch (telemetry.fetch(sourceKey, () -> fetcher.fetch(url))) {
+            case FetchResult.Failed failed -> new Loaded.Failed(failed.reason().tag());
+            case FetchResult.Fetched fetched -> parseFetched(fetched, clock.instant());
+        };
+    }
+
+    private Loaded parseFetched(FetchResult.Fetched fetched, Instant fetchedAt) {
         try {
             ParsedFeed feed = telemetry.span(PARSE_SPAN, () -> parse(fetched));
             return new Loaded.Parsed(feed, fetchedAt);

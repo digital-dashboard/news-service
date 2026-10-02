@@ -8,11 +8,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.j11a.argus.testsupport.AdminKeys;
-import com.j11a.argus.testsupport.FeedStubServer;
 import com.j11a.argus.testsupport.Fixtures;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 import tools.jackson.databind.json.JsonMapper;
@@ -24,9 +22,6 @@ class FeedApiIT extends AbstractIntegrationTest {
     private static final String RSS = "application/rss+xml";
 
     private final JsonMapper mapper = JsonMapper.builder().build();
-
-    @Autowired
-    private FeedStubServer stub;
 
     private ResultActions createFeed(String path, String topic) throws Exception {
         return mockMvc.perform(post(FEEDS).header(AdminKeys.HEADER, AdminKeys.VALID)
@@ -201,5 +196,78 @@ class FeedApiIT extends AbstractIntegrationTest {
         assertThat(jdbcClient.sql("SELECT count(*) FROM feed").query(Long.class).single()).isEqualTo(2);
         assertThat(jdbcClient.sql("SELECT count(*) FROM article").query(Long.class).single()).isEqualTo(2);
         assertThat(jdbcClient.sql("SELECT count(*) FROM article_feed").query(Long.class).single()).isEqualTo(4);
+    }
+
+    private static String feedWith(String title, String language) {
+        return "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>" + title + "</title>"
+                + "<link>https://long.example.test/</link><description>d</description><language>" + language
+                + "</language><item><title>a</title><link>https://long.example.test/a</link></item></channel></rss>";
+    }
+
+    @Test
+    void aTitleAndLanguageLongerThanTheirColumnsStillCreateTheFeed() throws Exception {
+        String xml = feedWith("T".repeat(300), "x".repeat(20));
+        stub.serve("/api/long.xml", 200, RSS, xml.getBytes(StandardCharsets.UTF_8));
+
+        String body = createFeed("/api/long.xml", "NEWS")
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(mapper.readTree(body).path("name").asString()).hasSize(255);
+        assertThat(jdbcClient.sql("SELECT count(*) FROM feed WHERE language IS NULL").query(Long.class).single())
+                .isEqualTo(1);
+        assertThat(jdbcClient.sql("SELECT length(name) FROM feed").query(Integer.class).single()).isEqualTo(255);
+    }
+
+    @Test
+    void aUrlWithUserInfoIsAFieldError() throws Exception {
+        mockMvc.perform(post(FEEDS).header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"url\":\"http://user:pass@example.test/feed\",\"topic\":\"TECH\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[0].field").value("url"));
+    }
+
+    @Test
+    void anOffsetBeyondTheIntRangeIs400NamingThePageNot500() throws Exception {
+        mockMvc.perform(get(ARTICLES).param("page", "100000000").param("size", "100"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[0].field").value("page"));
+    }
+
+    @Test
+    void readsWithoutTheKeyHideTheFeedUrlQueryString() throws Exception {
+        stub.serveFixture("/api/guarded.xml", "bbc-like-rss2.xml");
+        long id = mapper.readTree(createFeed("/api/guarded.xml?token=abc", "WORLD").andReturn().getResponse()
+                .getContentAsString()).path("id").asLong();
+
+        String body = mockMvc.perform(get(FEEDS + "/" + id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.url").value(stub.baseUrl() + "/api/guarded.xml"))
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).doesNotContain("token");
+    }
+
+    @Test
+    void readsWithTheKeyShowTheFullFeedUrl() throws Exception {
+        stub.serveFixture("/api/guarded.xml", "bbc-like-rss2.xml");
+        long id = mapper.readTree(createFeed("/api/guarded.xml?token=abc", "WORLD").andReturn().getResponse()
+                .getContentAsString()).path("id").asLong();
+
+        mockMvc.perform(get(FEEDS + "/" + id).header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.url").value(stub.baseUrl() + "/api/guarded.xml?token=abc"));
+    }
+
+    @Test
+    void createWithTheKeyEchoesTheFullFeedUrl() throws Exception {
+        stub.serveFixture("/api/guarded.xml", "bbc-like-rss2.xml");
+
+        createFeed("/api/guarded.xml?token=abc", "WORLD")
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.url").value(stub.baseUrl() + "/api/guarded.xml?token=abc"));
     }
 }

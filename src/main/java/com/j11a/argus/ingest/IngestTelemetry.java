@@ -18,8 +18,8 @@ import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import org.springframework.stereotype.Component;
 
 /**
@@ -30,6 +30,7 @@ import org.springframework.stereotype.Component;
 public class IngestTelemetry {
 
     static final String NO_REASON = "none";
+    private static final String COMPLETED = "completed";
     private static final String FAILED = "failed";
     private static final String FETCHED = "fetched";
     private static final String UNEXPECTED_FETCH_REASON = "io";
@@ -47,7 +48,6 @@ public class IngestTelemetry {
         this.tracer = tracer;
     }
 
-    /** Runs work inside an argus.ingest observation; outcome is derived from the report it returns. */
     IngestReport ingest(Feed feed, Supplier<IngestReport> work) {
         Observation observation = Observation.createNotStarted(MetricNames.INGEST, observations)
                 .lowCardinalityKeyValue(SOURCE, feed.getSource().getKey())
@@ -57,7 +57,7 @@ public class IngestTelemetry {
         String outcome = FAILED;
         try (Observation.Scope ignored = observation.openScope()) {
             IngestReport report = work.get();
-            outcome = report.outcome() == IngestReport.Outcome.COMPLETED ? "completed" : FAILED;
+            outcome = report.outcome() == IngestReport.Outcome.COMPLETED ? COMPLETED : FAILED;
             return report;
         } catch (RuntimeException e) {
             observation.error(e);
@@ -80,15 +80,16 @@ public class IngestTelemetry {
             finishFetch(observation, FAILED, UNEXPECTED_FETCH_REASON);
             throw e;
         }
-        if (result instanceof FetchResult.Fetched fetched) {
-            DistributionSummary.builder(MetricNames.FETCH_SIZE)
-                    .baseUnit("bytes")
-                    .tag(SOURCE, sourceKey)
-                    .register(meters)
-                    .record(fetched.body().length);
-            finishFetch(observation, FETCHED, NO_REASON);
-        } else {
-            finishFetch(observation, FAILED, ((FetchResult.Failed) result).reason().tag());
+        switch (result) {
+            case FetchResult.Fetched fetched -> {
+                DistributionSummary.builder(MetricNames.FETCH_SIZE)
+                        .baseUnit("bytes")
+                        .tag(SOURCE, sourceKey)
+                        .register(meters)
+                        .record(fetched.body().length);
+                finishFetch(observation, FETCHED, NO_REASON);
+            }
+            case FetchResult.Failed failed -> finishFetch(observation, FAILED, failed.reason().tag());
         }
         return result;
     }

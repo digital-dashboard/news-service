@@ -31,22 +31,29 @@ final class EntryMapper {
         if (feed.originalWireFeed() instanceof Channel channel && channel.getItems().size() == feed.getEntries().size()) {
             boolean rdf = channel.getFeedType().startsWith("rss_1");
             for (Item item : channel.getItems()) {
-                String raw = rdf ? item.getUri() : item.getGuid() == null ? null : item.getGuid().getValue();
-                guids.add(HttpUrls.trimToNull(raw));
+                guids.add(RawValues.trimToNull(rawGuid(item, rdf)));
             }
             return guids;
         }
         for (SyndEntry entry : feed.getEntries()) {
-            guids.add(HttpUrls.trimToNull(entry.getUri()));
+            guids.add(RawValues.trimToNull(entry.getUri()));
         }
         return guids;
     }
 
+    private static @Nullable String rawGuid(Item item, boolean rdf) {
+        // RSS 1.0 identifies an item by rdf:about.
+        if (rdf) {
+            return item.getUri();
+        }
+        return item.getGuid() == null ? null : item.getGuid().getValue();
+    }
+
     static ParsedEntry map(SyndEntry entry, @Nullable String rawGuid, URI base, @Nullable String feedAuthor) {
-        String author = HttpUrls.trimToNull(entry.getAuthor());
+        String author = RawValues.trimToNull(entry.getAuthor());
         return new ParsedEntry(
                 rawGuid,
-                HttpUrls.resolveLink(base, entry.getLink()),
+                RawValues.resolveHttp(base, entry.getLink()),
                 entry.getTitle(),
                 excerpt(entry),
                 author != null ? author : feedAuthor,
@@ -77,7 +84,7 @@ final class EntryMapper {
                 ? dc.getSubjects().stream().map(DCSubject::getValue)
                 : Stream.empty();
         return Stream.concat(entry.getCategories().stream().map(SyndCategory::getName), subjects)
-                .map(HttpUrls::trimToNull)
+                .map(RawValues::trimToNull)
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();

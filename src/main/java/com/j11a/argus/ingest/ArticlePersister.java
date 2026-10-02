@@ -6,8 +6,10 @@ import com.j11a.argus.article.NewArticle;
 import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.parse.ParsedEntry;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class ArticlePersister {
 
     static final String MISSING_IDENTITY = "missing_identity";
+
+    private record Keyed(String guidKey, ParsedEntry entry) {
+    }
 
     private final ArticleInserter inserter;
 
@@ -26,23 +31,23 @@ public class ArticlePersister {
     @Transactional
     public PersistCounts persist(Feed feed, List<ParsedEntry> entries, Instant fetchedAt) {
         long sourceId = feed.getSource().getId();
+        // Ascending key order, so two feeds sharing entries lock rows in the same order and cannot deadlock.
+        List<Keyed> keyed = entries.stream()
+                .flatMap(entry -> Optional.ofNullable(EntryKeys.guidKey(entry.guid(), entry.link()))
+                        .map(key -> new Keyed(key, entry))
+                        .stream())
+                .sorted(Comparator.comparing(Keyed::guidKey))
+                .toList();
         int inserted = 0;
-        int unchanged = 0;
-        int skipped = 0;
-        for (ParsedEntry entry : entries) {
-            String guidKey = EntryKeys.guidKey(entry.guid(), entry.link());
-            if (guidKey == null) {
-                skipped++;
-                continue;
-            }
-            InsertOutcome outcome = inserter.insert(toArticle(sourceId, guidKey, entry, fetchedAt), feed.getId());
-            if (outcome == InsertOutcome.INSERTED) {
+        for (Keyed candidate : keyed) {
+            NewArticle article = toArticle(sourceId, candidate.guidKey(), candidate.entry(), fetchedAt);
+            if (inserter.insert(article, feed.getId()) == InsertOutcome.INSERTED) {
                 inserted++;
-            } else {
-                unchanged++;
             }
         }
-        return new PersistCounts(inserted, unchanged, skipped == 0 ? Map.of() : Map.of(MISSING_IDENTITY, skipped));
+        int skipped = entries.size() - keyed.size();
+        return new PersistCounts(inserted, keyed.size() - inserted,
+                skipped == 0 ? Map.of() : Map.of(MISSING_IDENTITY, skipped));
     }
 
     private static NewArticle toArticle(long sourceId, String guidKey, ParsedEntry entry, Instant fetchedAt) {

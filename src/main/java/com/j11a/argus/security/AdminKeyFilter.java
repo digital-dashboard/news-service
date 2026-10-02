@@ -20,9 +20,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * Grants ADMIN when X-Admin-Key matches. Digests are compared so the comparison time does not depend on how much of
  * the key was right, nor on its length. Not a bean: Boot would register a bean filter in the servlet chain as well.
  */
-final class AdminKeyFilter extends OncePerRequestFilter {
+public final class AdminKeyFilter extends OncePerRequestFilter {
 
-    static final String HEADER = "X-Admin-Key";
+    public static final String HEADER = "X-Admin-Key";
     static final String ADMIN_AUTHORITY = "ADMIN";
     private static final String PRINCIPAL = "admin";
 

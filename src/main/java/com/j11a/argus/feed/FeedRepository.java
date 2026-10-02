@@ -8,6 +8,4 @@ public interface FeedRepository extends JpaRepository<Feed, Long> {
 
     @EntityGraph(attributePaths = "source")
     Optional<Feed> findWithSourceById(Long id);
-
-    Optional<Feed> findByUrl(String url);
 }

@@ -1,6 +1,6 @@
-package com.j11a.argus.feed;
+package com.j11a.argus.feed.api;
 
-import com.j11a.argus.ingest.EntryKeys;
+import com.j11a.argus.url.HttpUrls;
 import jakarta.validation.Constraint;
 import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
@@ -17,7 +17,7 @@ import java.lang.annotation.Target;
 @Constraint(validatedBy = AbsoluteHttpUrl.Validator.class)
 public @interface AbsoluteHttpUrl {
 
-    String message() default "must be an absolute http or https URL";
+    String message() default "must be an absolute http or https URL without user-info";
 
     Class<?>[] groups() default {};
 
@@ -28,7 +28,8 @@ public @interface AbsoluteHttpUrl {
 
         @Override
         public boolean isValid(String value, ConstraintValidatorContext context) {
-            return value == null || value.isBlank() || EntryKeys.cleanLink(value) != null;
+            return value == null || value.isBlank()
+                    || HttpUrls.parseHttp(value).filter(uri -> !HttpUrls.hasUserInfo(uri)).isPresent();
         }
     }
 }

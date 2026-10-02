@@ -103,5 +103,5 @@ Phase 2 additions, after the dashboard is imported:
 
 - [ ] After deploy, POST a feed with the admin key and refresh it (see the API section of the main README).
 - [ ] The Ingestion pipeline and Data quality rows show data.
-- [ ] Tempo shows an `argus.ingest` trace with fetch, parse and persist children and an outbound client span.
+- [ ] After a refresh, Tempo shows an `argus.ingest` trace with fetch, parse and persist children and an outbound client span. (After POST /feeds, fetch and parse sit beside `argus.ingest`, not under it.)
 - [ ] Loki ingest log lines carry `feedId` and `sourceId`.

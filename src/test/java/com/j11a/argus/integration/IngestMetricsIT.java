@@ -2,15 +2,12 @@ package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.j11a.argus.feed.CreateFeedRequest;
-import com.j11a.argus.feed.FeedResponse;
-import com.j11a.argus.feed.FeedService;
 import com.j11a.argus.feed.Topic;
+import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.observability.MeterSpec;
 import com.j11a.argus.observability.MetricCatalogue;
 import com.j11a.argus.observability.MetricNames;
-import com.j11a.argus.testsupport.FeedStubServer;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Meter;
@@ -31,12 +28,6 @@ class IngestMetricsIT extends AbstractIntegrationTest {
     private static final String SITE_SOURCE = "sparse.example.test";
     private static final Set<String> AUTOMATIC_TAGS = Set.of("error", "application");
     private static final Set<String> FORBIDDEN_TAG_KEYS = Set.of("feed_id", "feed.id", "url", "guid", "link");
-
-    @Autowired
-    private FeedStubServer stub;
-
-    @Autowired
-    private FeedService feedService;
 
     @Autowired
     private FeedIngestService ingestService;
@@ -68,8 +59,7 @@ class IngestMetricsIT extends AbstractIntegrationTest {
     }
 
     private FeedResponse create() {
-        stub.serveFixture(PATH, "missing-guid-date.xml");
-        return feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS));
+        return createFeedFrom(PATH, "missing-guid-date.xml", Topic.NEWS);
     }
 
     @Test

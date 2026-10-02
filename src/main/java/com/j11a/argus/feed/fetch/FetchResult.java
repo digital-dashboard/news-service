@@ -7,7 +7,11 @@ import org.jspecify.annotations.Nullable;
 
 public sealed interface FetchResult {
 
-    record Fetched(byte[] body, @Nullable String contentType, URI finalUrl, boolean permanentRedirect)
+    /**
+     * permanentTarget is the last URL reached through an unbroken chain of 301/308 hops from the first request; null
+     * when the first hop was not permanent or there were no redirects.
+     */
+    record Fetched(byte[] body, @Nullable String contentType, URI finalUrl, @Nullable URI permanentTarget)
             implements FetchResult {
 
         @Override
@@ -16,19 +20,19 @@ public sealed interface FetchResult {
                     && Arrays.equals(body, that.body)
                     && Objects.equals(contentType, that.contentType)
                     && finalUrl.equals(that.finalUrl)
-                    && permanentRedirect == that.permanentRedirect;
+                    && Objects.equals(permanentTarget, that.permanentTarget);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(Arrays.hashCode(body), contentType, finalUrl, permanentRedirect);
+            return Objects.hash(Arrays.hashCode(body), contentType, finalUrl, permanentTarget);
         }
 
         // Neither the body nor the query string belongs in a log line.
         @Override
         public String toString() {
             return "Fetched[bodyBytes=" + body.length + ", contentType=" + contentType
-                    + ", permanentRedirect=" + permanentRedirect + "]";
+                    + ", permanentTarget=" + (permanentTarget != null) + "]";
         }
     }
 

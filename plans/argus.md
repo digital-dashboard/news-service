@@ -204,13 +204,13 @@ Phase 2 also added exact-URL 409 `FEED_URL_CONFLICT` and a minimal `GET /feeds/{
 
 Telemetry:
 - Meters:
-  - The per-feed fetch timer (`source`, `outcome`, `reason`)
-  - The per-feed ingest timer
+  - The per-source fetch timer (`source`, `outcome`, `reason`)
+  - The per-source ingest timer
   - The downloaded-bytes distribution
-  - The entry decision counter (`inserted`/`unchanged` for now)
+  - The entry decision counter (`inserted`/`unchanged`/`skipped`)
   - The parse data-quality counter (entries missing a date, GUID, image or author)
 - A feed-ingest span with fetch, parse and persist children, the outbound `RestClient` span, and `feedId`/`sourceId` in MDC and as span attributes.
-- Dashboard: a new **Ingestion pipeline** row (fetch outcomes rate, fetch p95 by source, bytes per fetch, entry decisions) and a **Data quality** row (missing fields by kind, as rate and share).
+- Dashboard: a new **Ingestion pipeline** row (fetch outcomes rate, fetch p95 by source, ingest p95 by source, bytes per fetch, entry decisions) and a **Data quality** row (missing fields by kind, as rate and share).
 
 ### Acceptance criteria
 
@@ -327,7 +327,7 @@ Telemetry:
 
 Prevent duplicate subscriptions, and make source corrections clean. Exact-URL conflicts (409 `FEED_URL_CONFLICT`) already exist from Phase 2; this phase adds the scheme, `www.`, redirect and self-link checks.
 - Creating or updating a feed checks the URL as entered, the final URL after redirects, and the feed's self link against every existing feed's identity URLs. A conflict returns 409 `FEED_URL_CONFLICT` with `existingFeedId`.
-- During polling, a 301 or 308 updates the stored URL. If that would collide with another feed, the feed is disabled and its last error says "duplicate of feed {id}".
+- During polling, a 301 or 308 updates the stored URL. The fetcher reports `permanentTarget`, the end of the leading 301/308 chain, for this. If that would collide with another feed, the feed is disabled and its last error says "duplicate of feed {id}".
 - `POST /sources/{id}/merge` and changing a feed's `sourceId` both:
   - Move feeds and articles in one transaction holding both source locks.
   - Collapse duplicates to the oldest article, folding in feed links and watch matches.
@@ -347,6 +347,7 @@ Telemetry:
 ### Acceptance criteria
 
 - [ ] URLs that differ only by scheme, `www.` or trailing slash, a URL that redirects to an existing feed, and a matching self link all give 409 naming the existing feed.
+- [ ] A feed's source key must agree with its host or self link; a feed declaring another outlet's site link is not attached to that outlet's source.
 - [ ] A permanent redirect updates the stored URL. A temporary redirect doesn't.
 - [ ] A permanent redirect onto another subscribed feed disables the feed with the "duplicate of" error.
 - [ ] Merging two sources with overlapping articles leaves one copy per duplicate group, with no duplicate link or match rows, and removes the empty source.

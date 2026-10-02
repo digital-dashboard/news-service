@@ -43,7 +43,7 @@ class FeedFetcherWiringTest {
                 FetchResult result = context.getBean(FeedFetcher.class).fetch(URI.create(server.baseUrl() + "/old"));
 
                 assertThat(result).isInstanceOfSatisfying(Fetched.class, fetched -> {
-                    assertThat(fetched.permanentRedirect()).isTrue();
+                    assertThat(fetched.permanentTarget()).isEqualTo(URI.create(server.baseUrl() + "/new"));
                     assertThat(fetched.finalUrl().getPath()).isEqualTo("/new");
                 });
                 assertThat(server.requestsTo("/old")).hasSize(1);

@@ -4,7 +4,6 @@ import io.micrometer.common.KeyValue;
 import io.micrometer.observation.ObservationFilter;
 import io.micrometer.observation.ObservationPredicate;
 import java.net.URI;
-import java.net.URISyntaxException;
 import org.springframework.http.client.observation.ClientRequestObservationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -34,12 +33,17 @@ public class ObservabilityConfig {
         };
     }
 
+    // Built by hand: the multi-argument URI constructors re-quote every "%", turning %20 into %2520.
     static String withoutQuery(URI uri) {
-        try {
-            return new URI(uri.getScheme(), null, uri.getHost(), uri.getPort(), uri.getRawPath(), null, null)
-                    .toASCIIString();
-        } catch (URISyntaxException e) {
-            return uri.getScheme() + "://" + uri.getHost();
+        String host = uri.getHost();
+        StringBuilder url = new StringBuilder(uri.getScheme()).append("://")
+                .append(host.contains(":") && !host.startsWith("[") ? "[" + host + "]" : host);
+        if (uri.getPort() != -1) {
+            url.append(':').append(uri.getPort());
         }
+        if (uri.getRawPath() != null) {
+            url.append(uri.getRawPath());
+        }
+        return url.toString();
     }
 }

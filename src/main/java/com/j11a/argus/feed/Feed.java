@@ -55,19 +55,6 @@ public class Feed {
     protected Feed() {
     }
 
-    public Feed(Source source, String name, String url, @Nullable String siteUrl, Topic topic,
-            @Nullable String language, Instant now) {
-        this.source = source;
-        this.name = name;
-        this.url = url;
-        this.siteUrl = siteUrl;
-        this.topic = topic;
-        this.language = language;
-        this.enabled = true;
-        this.createdAt = now;
-        this.updatedAt = now;
-    }
-
     public Long getId() {
         return id;
     }

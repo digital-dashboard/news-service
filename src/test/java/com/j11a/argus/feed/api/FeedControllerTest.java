@@ -1,4 +1,4 @@
-package com.j11a.argus.feed;
+package com.j11a.argus.feed.api;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.j11a.argus.config.WebMvcConfig;
+import com.j11a.argus.feed.Topic;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.IngestReport;
 import com.j11a.argus.security.SecurityConfig;
@@ -84,6 +85,15 @@ class FeedControllerTest {
         mockMvc.perform(adminPost(FEEDS, "{\"url\":\"ftp://example.test/rss\",\"topic\":\"TECH\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[0].field").value("url"));
+    }
+
+    @Test
+    void urlWithUserInfoIsAFieldError() throws Exception {
+        mockMvc.perform(adminPost(FEEDS, "{\"url\":\"http://user:pass@example.test/feed\",\"topic\":\"TECH\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[0].field").value("url"));
+        verifyNoInteractions(feeds);
     }
 
     @Test

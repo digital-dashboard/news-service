@@ -1,5 +1,6 @@
 package com.j11a.argus.article;
 
+import com.j11a.argus.web.error.ApiException;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.data.web.PagedModel;
@@ -13,6 +14,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class ArticleController {
 
     static final int MAX_PAGE_SIZE = 100;
+    // The row offset (page * size) must fit the int that the JPA query takes.
+    private static final String PAGE_TOO_DEEP = "page is too large for this size";
 
     private final ArticleQueryService articles;
 
@@ -20,11 +23,14 @@ public class ArticleController {
         this.articles = articles;
     }
 
-    // Spring Data's Pageable resolver would clamp an oversized page instead of rejecting it.
+    // Spring Data's Pageable resolver would clamp an oversized size instead of rejecting it.
     @GetMapping
     public PagedModel<ArticleResponse> list(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size) {
+        if ((long) page * size > Integer.MAX_VALUE) {
+            throw ApiException.validationFailed("page", PAGE_TOO_DEEP);
+        }
         return new PagedModel<>(articles.list(page, size));
     }
 }

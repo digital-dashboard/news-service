@@ -3,13 +3,11 @@ package com.j11a.argus.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
-import com.j11a.argus.feed.CreateFeedRequest;
-import com.j11a.argus.feed.FeedResponse;
-import com.j11a.argus.feed.FeedService;
 import com.j11a.argus.feed.Topic;
+import com.j11a.argus.feed.api.CreateFeedRequest;
+import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.testsupport.AdminKeys;
-import com.j11a.argus.testsupport.FeedStubServer;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.sdk.trace.data.SpanData;
@@ -34,20 +32,13 @@ class IngestObservabilityIT extends AbstractIntegrationTest {
     private final JsonMapper mapper = JsonMapper.builder().build();
 
     @Autowired
-    private FeedStubServer stub;
-
-    @Autowired
-    private FeedService feedService;
-
-    @Autowired
     private FeedIngestService ingestService;
 
     @Autowired
     private SpanCollectorConfig.CollectingSpanProcessor spans;
 
     private FeedResponse create() {
-        stub.serveFixture(PATH, "bbc-like-rss2.xml");
-        return feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.WORLD));
+        return createFeedFrom(PATH, "bbc-like-rss2.xml", Topic.WORLD);
     }
 
     private SpanData named(List<SpanData> trace, String name) {

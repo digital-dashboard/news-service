@@ -2,13 +2,10 @@ package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.j11a.argus.feed.CreateFeedRequest;
-import com.j11a.argus.feed.FeedResponse;
-import com.j11a.argus.feed.FeedService;
 import com.j11a.argus.feed.Topic;
+import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.IngestReport;
-import com.j11a.argus.testsupport.FeedStubServer;
 import com.j11a.argus.testsupport.Fixtures;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,17 +15,10 @@ class FeedIngestIT extends AbstractIntegrationTest {
     private static final String PATH = "/ingest/feed.xml";
 
     @Autowired
-    private FeedStubServer stub;
-
-    @Autowired
-    private FeedService feedService;
-
-    @Autowired
     private FeedIngestService ingestService;
 
     private FeedResponse createFrom(String fixture) {
-        stub.serveFixture(PATH, fixture);
-        return feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.WORLD));
+        return createFeedFrom(PATH, fixture, Topic.WORLD);
     }
 
     private long articleCount() {
@@ -98,12 +88,24 @@ class FeedIngestIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void articlesAreStoredWithTheEffectiveTimeCappedAtTheFetchTime() {
-        createFrom("bbc-like-rss2.xml");
+    void entriesWithALinkThatIsNotHttpAreStoredWithoutTheLink() {
+        createFrom("unsafe-link.xml");
 
-        Long afterFetch = jdbcClient.sql("SELECT count(*) FROM article WHERE effective_at > fetched_at")
+        assertThat(articleCount()).isEqualTo(2);
+        assertThat(jdbcClient.sql("SELECT count(*) FROM article WHERE link IS NULL AND link_key IS NULL")
+                .query(Long.class).single()).isEqualTo(2);
+    }
+
+    @Test
+    void articlesDatedInTheFutureAreStoredWithTheFetchTimeAsEffectiveTime() {
+        createFrom("future-dated.xml");
+
+        Long dated2100 = jdbcClient.sql("SELECT count(*) FROM article WHERE published_at > fetched_at")
+                .query(Long.class).single();
+        Long cappedToFetch = jdbcClient.sql("SELECT count(*) FROM article WHERE effective_at = fetched_at")
                 .query(Long.class).single();
 
-        assertThat(afterFetch).isZero();
+        assertThat(dated2100).isEqualTo(2);
+        assertThat(cappedToFetch).isEqualTo(2);
     }
 }

@@ -11,7 +11,7 @@
   - **Paging.** Boot 4.1 `spring.data.web.pageable.max-page-size` silently clamps (default 2000). Spring Data's `Pageable` resolver can therefore never return a 400.
   - **HTTP client settings.** `spring.http.clients.connect-timeout`, `read-timeout` and `redirects` (`follow`/`dont-follow`) are global client settings.
   - **RestClient starter.** `spring-boot-starter-restclient` exists for 4.1.1. `RestClient` built from the injected `RestClient.Builder` gets the observation (client span and `http.client.requests`). `RestClient.create()` does not.
-  - **Read timeout.** Spring Web 7.0.9 `JdkClientHttpRequest$TimeoutHandler` wraps the response body stream. The read timeout appears to bound body reads too. A slow-drip stub test must prove it; otherwise add a total deadline.
+  - **Read timeout.** Spring Web 7.0.9 `JdkClientHttpRequest$TimeoutHandler` wraps the response body stream. Verified by FeedFetcherTest: the read timeout is a total deadline that bounds body reads.
   - **Library versions.**
     - ROME 2.1.0 and `rome-modules` 2.1.0 (`com.rometools`) are the latest.
     - jsoup is at 1.23.2.
@@ -43,7 +43,7 @@
    - `name` is optional and defaults to the parsed feed title.
    - A new source is named after its registrable domain until phase 4's `PATCH /sources`.
 5. **Interim additions.**
-   - Exact cleaned-URL duplicates give 409 `FEED_URL_CONFLICT` with an `existingFeedId` property. A `DataIntegrityViolationException` race on `feed.url` also maps to that 409. The scheme, `www.`, redirect and self-link checks stay in phase 5.
+   - Exact cleaned-URL duplicates give 409 `FEED_URL_CONFLICT` with an `existingFeedId` property. An insert race on `feed.url` also maps to that 409. The scheme, `www.`, redirect and self-link checks stay in phase 5.
    - A minimal `GET /feeds/{id}` is added, so the 201 `Location` header resolves.
 
 ## Defaults chosen without a question (PRD-backed or conventional)
@@ -55,7 +55,7 @@
   - feeds, storyId and storySourceCount are added in later phases. Additive changes don't break clients.
   - Sort order is `effective_at DESC, id DESC`.
   - There is no `sort` parameter.
-- **Configurable User-Agent**, default `Argus/<version> (self-hosted RSS aggregator)`.
+- **Configurable User-Agent**, default the literal `Argus/0.1 (self-hosted RSS aggregator)` (resources are not Maven-filtered).
 
 ## Blueprint corrections (applied to the implementer prompts)
 
@@ -71,7 +71,7 @@
   - http/https only on every hop;
   - `Location` resolved against the current URL.
   
-  `Fetched` carries `finalUrl` and `permanentRedirect` from now on, so phases 3 and 5 don't change the signature. The JDK's own limit is a JVM-wide system property and reports neither value.
+  `Fetched` carries `finalUrl` and `permanentTarget` (the end of the leading 301/308 chain, or null) from now on, so phases 3 and 5 don't change the signature. The JDK's own limit is a JVM-wide system property and reports neither value.
 - **Size cap.** The body is read through a capped stream (max+1 bytes, plus an early `Content-Length` reject). `.body(byte[].class)` buffers without limit. The cap applies to the bytes after any decompression.
 - **Insert path.**
   - Use `JdbcClient` with `INSERT … ON CONFLICT (source_id, guid_key) DO NOTHING RETURNING id`. On a conflict, select the existing id.
@@ -106,7 +106,7 @@
 | Package | Pure? | Contents |
 |---|---|---|
 | `feed.parse` | yes | `FeedParser.parse(byte[] body, URI feedUrl, @Nullable String contentType)` produces `ParsedFeed`/`ParsedEntry` records or throws `FeedParseException(Reason: MALFORMED_XML, NOT_A_FEED, EMPTY)`. Also `ExcerptBuilder` (jsoup; ~500 characters at a word boundary) and `ImageSelector`. |
-| `feed.fetch` | no | `FeedFetcher.fetch(URI)` returns a sealed `FetchResult`: `Fetched(body, contentType, finalUrl, permanentRedirect)` or `Failed(FetchFailureReason, Integer status)`. Reasons: `TIMEOUT, HTTP_STATUS, TOO_LARGE, INVALID_URL, REDIRECT_LIMIT, IO`. Config is `FetchProperties` (`argus.fetch`: user-agent, max-body-size 5MB, max-redirects 5). |
+| `feed.fetch` | no | `FeedFetcher.fetch(URI)` returns a sealed `FetchResult`: `Fetched(body, contentType, finalUrl, permanentTarget)` or `Failed(FetchFailureReason, Integer status)`. Reasons: `TIMEOUT, HTTP_STATUS, TOO_LARGE, INVALID_URL, REDIRECT_LIMIT, IO`. Config is `FetchProperties` (`argus.fetch`: user-agent, max-body-size 5MB, max-redirects 5). |
 | `source` | resolver pure | `SourceResolver.keyFor(siteLink, feedUrl)`; the `Source` entity and repository; `SourceService.findOrCreate` (`ON CONFLICT (key) DO NOTHING`, then select; own transaction). |
 | `feed` | no | The `Feed` entity and repository, the `Topic` enum, `FeedService` (create, get), `FeedController` (`POST /feeds`, `GET /feeds/{id}`, `POST /feeds/{id}/refresh`), DTOs. |
 | `article` | no | The `Article` entity (reads), `ArticleInserter` (JdbcClient), `ArticleQueryService`, `ArticleController` (`GET /articles` with `@Min(0) page`, `@Min(1) @Max(100) size`, returning `PagedModel`), DTOs. |
@@ -201,7 +201,7 @@ The `source` tag value is the source key (the registrable domain), which is boun
       - 503
       - oversized
       - slow-drip timeout
-      - redirect followed (final URL, permanent flag)
+      - redirect followed (final URL, permanent target)
       - redirect limit
       - non-http scheme, initial and on redirect
       - User-Agent sent
@@ -226,6 +226,26 @@ The `source` tag value is the source key (the registrable domain), which is boun
       - `chore: drop Grafana provider provisioning in favour of import`
       - `docs: add phase 2 plan and update docs`. This one includes this file.
 - **After WP-3:** I verify the reports myself (`git log`/`status`/`diff --stat`, re-run `verify`, read the riskiest code). Then come the six-reviewer gate, triage with the owner, fixes, and re-verification.
+
+## Review fixes
+
+Applied after the six-reviewer gate:
+
+1. Entry links are accepted only if they are http(s); `javascript:`, `data:` and the like become null.
+2. `GET /articles` rejects a page whose offset overflows an int with 400 `VALIDATION_FAILED` on `page`.
+3. Feed name (255), language (16) and source key (255) are guarded against column overflow on create.
+4. `ObservabilityConfig.withoutQuery` no longer double-encodes `%` and brackets IPv6 hosts.
+5. The slow-drip test now drips; the read timeout is confirmed to be a total deadline.
+6. One shared `url` package (`HttpUrls`, `Links`) replaces the duplicated scheme checks; the feed API moved to `feed.api`, which removes the package cycle.
+7. The feed insert is `INSERT ... ON CONFLICT (url) DO NOTHING RETURNING id`, so a race gives 409 without a constraint-name match.
+8. URLs with user-info are rejected on create, and by the fetcher on the first URL and on every redirect hop.
+9. A relative `Location` against an empty path resolves to `https://host/feed.xml`.
+10. `Fetched.permanentTarget` replaces `permanentRedirect`.
+11. `argus.parse.missing` is recorded after the persist commit, next to the decision counters.
+12. Entries are inserted in ascending `guid_key` order to avoid deadlocks between feeds.
+13. The effective-time IT uses a feed dated 2100 and asserts `effective_at = fetched_at`.
+14. A UTF-8 BOM is stripped before the windows-1252 fallback decode.
+15. Feed URLs lose user-info and query string unless the request carries a valid admin key.
 
 ## Verification
 

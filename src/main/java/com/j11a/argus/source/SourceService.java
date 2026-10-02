@@ -1,6 +1,6 @@
 package com.j11a.argus.source;
 
-import com.j11a.argus.ingest.EntryKeys;
+import com.j11a.argus.url.Links;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class SourceService {
 
+    // The name starts as the key until a source rename exists.
     private static final String INSERT = """
             INSERT INTO source (key, name, homepage_url, created_at, updated_at)
             VALUES (:key, :key, :homepage, :now, :now)
@@ -33,10 +34,9 @@ public class SourceService {
     public Source findOrCreate(String key, @Nullable String siteLink) {
         jdbc.sql(INSERT)
                 .param("key", key)
-                .param("homepage", EntryKeys.cleanLink(siteLink))
+                .param("homepage", Links.clean(siteLink))
                 .param("now", OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))
                 .update();
-        long id = jdbc.sql("SELECT id FROM source WHERE key = :key").param("key", key).query(Long.class).single();
-        return sources.findById(id).orElseThrow();
+        return sources.findByKey(key).orElseThrow();
     }
 }

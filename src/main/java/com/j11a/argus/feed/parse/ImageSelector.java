@@ -31,14 +31,13 @@ public final class ImageSelector {
 
     public static @Nullable String select(SyndEntry entry, URI base) {
         List<String> candidates = new ArrayList<>();
-        MediaEntryModule media = entry.getModule(MediaModule.URI) instanceof MediaEntryModule module ? module : null;
-        if (media != null) {
+        if (entry.getModule(MediaModule.URI) instanceof MediaEntryModule media) {
             candidates.addAll(thumbnails(media));
             candidates.addAll(imageContents(media));
         }
         candidates.addAll(imageEnclosures(entry));
         return Stream.concat(candidates.stream(), htmlImages(entry))
-                .map(raw -> HttpUrls.resolveHttp(base, raw))
+                .map(raw -> RawValues.resolveHttp(base, raw))
                 .filter(Objects::nonNull)
                 .findFirst()
                 .orElse(null);
@@ -79,16 +78,16 @@ public final class ImageSelector {
     }
 
     private static boolean isImage(MediaContent content) {
-        String medium = content.getMedium();
-        String type = content.getType();
-        return IMAGE_MEDIUM.equalsIgnoreCase(medium)
-                || (type != null && type.toLowerCase(Locale.ROOT).startsWith(IMAGE_TYPE_PREFIX));
+        return IMAGE_MEDIUM.equalsIgnoreCase(content.getMedium()) || isImageType(content.getType());
+    }
+
+    private static boolean isImageType(@Nullable String type) {
+        return type != null && type.toLowerCase(Locale.ROOT).startsWith(IMAGE_TYPE_PREFIX);
     }
 
     private static List<String> imageEnclosures(SyndEntry entry) {
         return entry.getEnclosures().stream()
-                .filter(enclosure -> enclosure.getType() != null
-                        && enclosure.getType().toLowerCase(Locale.ROOT).startsWith(IMAGE_TYPE_PREFIX))
+                .filter(enclosure -> isImageType(enclosure.getType()))
                 .map(SyndEnclosure::getUrl)
                 .filter(Objects::nonNull)
                 .toList();

@@ -13,7 +13,6 @@ import java.util.Objects;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 
-/** Parses RSS (0.9x, 1.0, 2.0) and Atom (0.3, 1.0) into plain records. */
 public final class FeedParser {
 
     private static final String SELF_REL = "self";
@@ -24,11 +23,11 @@ public final class FeedParser {
             throw new FeedParseException(Reason.EMPTY);
         }
         SyndFeed feed = FeedReader.read(body, contentType);
-        String siteLink = HttpUrls.resolveHttp(feedUrl, siteLinkOf(feed));
+        String siteLink = RawValues.resolveHttp(feedUrl, siteLinkOf(feed));
         URI base = siteLink == null ? feedUrl : URI.create(siteLink);
         String feedAuthor = feed.getAuthors().stream()
                 .map(SyndPerson::getName)
-                .map(HttpUrls::trimToNull)
+                .map(RawValues::trimToNull)
                 .filter(Objects::nonNull)
                 .findFirst()
                 .orElse(null);
@@ -41,7 +40,7 @@ public final class FeedParser {
                 feed.getTitle(),
                 siteLink,
                 selfLink(feed, base),
-                HttpUrls.trimToNull(feed.getLanguage()),
+                RawValues.trimToNull(feed.getLanguage()),
                 entries);
     }
 
@@ -63,7 +62,7 @@ public final class FeedParser {
                 ? module.getLinks().stream().filter(link -> SELF_REL.equalsIgnoreCase(link.getRel())).map(Link::getHref)
                 : Stream.empty();
         return Stream.concat(syndLinks, atomModuleLinks)
-                .map(href -> HttpUrls.resolveLink(base, href))
+                .map(href -> RawValues.resolveLink(base, href))
                 .filter(Objects::nonNull)
                 .findFirst()
                 .orElse(null);

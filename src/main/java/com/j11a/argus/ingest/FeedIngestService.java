@@ -66,9 +66,9 @@ public class FeedIngestService {
 
     private IngestReport persist(Feed feed, ParsedFeed parsed, Instant fetchedAt) {
         String sourceKey = feed.getSource().getKey();
-        telemetry.recordMissing(sourceKey, parsed.entries());
         PersistCounts counts = telemetry.span(PERSIST_SPAN,
                 () -> persister.persist(feed, parsed.entries(), fetchedAt));
+        telemetry.recordMissing(sourceKey, parsed.entries());
         telemetry.recordDecisions(sourceKey, counts);
         return IngestReport.completed(feed.getId(), parsed.entries().size(), counts);
     }

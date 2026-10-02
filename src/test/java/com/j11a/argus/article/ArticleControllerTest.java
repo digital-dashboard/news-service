@@ -85,6 +85,24 @@ class ArticleControllerTest {
         verify(articles).list(2, 100);
     }
 
+    @Test
+    void anOffsetBeyondTheIntRangeIsRejectedNamingThePage() throws Exception {
+        mockMvc.perform(get(ARTICLES).param("page", "100000000").param("size", "100"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[0].field").value("page"))
+                .andExpect(jsonPath("$.errors[0].message").isNotEmpty());
+
+        verifyNoInteractions(articles);
+    }
+
+    @Test
+    void anOffsetExactlyAtTheIntLimitIsStillAccepted() throws Exception {
+        when(articles.list(21474836, 100)).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 100), 0));
+
+        mockMvc.perform(get(ARTICLES).param("page", "21474836").param("size", "100")).andExpect(status().isOk());
+    }
+
     static Stream<Arguments> badPaging() {
         return Stream.of(
                 Arguments.of("size", "101"),

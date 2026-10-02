@@ -12,7 +12,6 @@ public enum FetchFailureReason {
 
     private final String tag = name().toLowerCase(Locale.ROOT);
 
-    /** Lowercase form for metric tags. */
     public String tag() {
         return tag;
     }
