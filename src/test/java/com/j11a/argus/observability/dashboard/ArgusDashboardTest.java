@@ -35,8 +35,7 @@ class ArgusDashboardTest {
 
     @Test
     void committedDashboardPassesValidation() {
-        // Catalogue coverage stays off until a phase publishes custom meters.
-        List<Violation> violations = new DashboardValidator(MetricCatalogue.ALL, REQUIRED_VARIABLES, false).validate(dashboard);
+        List<Violation> violations = new DashboardValidator(MetricCatalogue.ALL, REQUIRED_VARIABLES, true).validate(dashboard);
 
         assertThat(violations).isEmpty();
     }
@@ -59,7 +58,8 @@ class ArgusDashboardTest {
                 .toList();
 
         assertThat(rows).containsExactly(
-                "Overview", "API & HTTP", "JVM & runtime", "PostgreSQL & HikariCP", "Container", "Traces", "Logs");
+                "Overview", "Ingestion pipeline", "Data quality", "API & HTTP", "JVM & runtime",
+                "PostgreSQL & HikariCP", "Container", "Traces", "Logs");
     }
 
     @Test
