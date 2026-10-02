@@ -79,9 +79,11 @@ final class EntryMapper {
     }
 
     private static List<String> categories(SyndEntry entry) {
-        Stream<String> subjects = entry.getModule(DCModule.URI) instanceof DCModule dc
-                ? dc.getSubjects().stream().map(DCSubject::getValue)
-                : Stream.empty();
+        Stream<String> subjects = Stream.ofNullable(entry.getModule(DCModule.URI))
+                .filter(DCModule.class::isInstance)
+                .map(DCModule.class::cast)
+                .flatMap(dc -> dc.getSubjects().stream())
+                .map(DCSubject::getValue);
         return Stream.concat(entry.getCategories().stream().map(SyndCategory::getName), subjects)
                 .map(RawValues::trimToNull)
                 .filter(Objects::nonNull)

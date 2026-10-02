@@ -53,6 +53,13 @@ class ExcerptBuilderTest {
     }
 
     @Test
+    void aWordEndingExactlyAtTheLimitIsKeptWhole() {
+        String text = "a".repeat(MAX) + " tail";
+
+        assertThat(ExcerptBuilder.fromHtml(text)).isEqualTo("a".repeat(MAX) + "…");
+    }
+
+    @Test
     void aWordCrossingTheLimitIsDroppedWhole() {
         String text = "x".repeat(MAX - 4) + " crossing the limit";
 

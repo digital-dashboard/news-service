@@ -53,10 +53,7 @@ public final class HttpUrls {
         if (uri.getPort() != -1) {
             redacted.append(':').append(uri.getPort());
         }
-        if (uri.getRawPath() != null) {
-            redacted.append(uri.getRawPath());
-        }
-        return redacted.toString();
+        return redacted.append(uri.getRawPath()).toString();
     }
 
     // URI.resolve on "https://host" plus "a" yields "https://hosta".

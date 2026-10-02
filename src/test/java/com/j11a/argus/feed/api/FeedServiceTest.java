@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -119,5 +120,97 @@ class FeedServiceTest {
         ArgumentCaptor<NewFeed> inserted = ArgumentCaptor.forClass(NewFeed.class);
         verify(inserter).insert(inserted.capture());
         assertThat(inserted.getValue().language()).hasSize(FeedService.MAX_LANGUAGE_LENGTH);
+    }
+
+    private NewFeed insertedFeedFor(CreateFeedRequest request) {
+        when(inserter.insert(any())).thenReturn(Optional.of(9L));
+        Feed stored = storedFeed();
+        when(feeds.findWithSourceById(9L)).thenReturn(Optional.of(stored));
+
+        service.create(request);
+
+        ArgumentCaptor<NewFeed> inserted = ArgumentCaptor.forClass(NewFeed.class);
+        verify(inserter).insert(inserted.capture());
+        return inserted.getValue();
+    }
+
+    @Test
+    void aUrlThatIsNotAbsoluteHttpIsABadRequestBeforeAnyLookup() {
+        CreateFeedRequest request = new CreateFeedRequest("ftp://example.test/rss.xml", null, Topic.TECH);
+
+        assertThatThrownBy(() -> service.create(request))
+                .isInstanceOfSatisfying(ApiException.class,
+                        e -> assertThat(e.code()).isEqualTo(ErrorCode.BAD_REQUEST));
+        verifyNoInteractions(inserter, loader);
+    }
+
+    @Test
+    void aFeedThatCannotBeReadIsRejectedWithTheLoaderReason() {
+        when(loader.load(any(URI.class), anyString())).thenReturn(new FeedLoader.Loaded.Failed("not_a_feed"));
+
+        assertThatThrownBy(() -> service.create(request()))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.code()).isEqualTo(ErrorCode.FEED_INVALID);
+                    assertThat(e.properties()).containsEntry("reason", "not_a_feed");
+                });
+    }
+
+    @Test
+    void aFailedFirstIngestStillReturnsTheCreatedFeed() {
+        loads("Example", null);
+        when(inserter.insert(any())).thenReturn(Optional.of(9L));
+        Feed stored = storedFeed();
+        when(feeds.findWithSourceById(9L)).thenReturn(Optional.of(stored));
+        doThrow(new IllegalStateException("database down")).when(ingest).ingestParsed(any(), any(), any());
+
+        FeedResponse response = service.create(request());
+
+        assertThat(response.id()).isEqualTo(9L);
+    }
+
+    @Test
+    void aRequestedNameIsStrippedAndWinsOverTheFeedTitle() {
+        loads("Parsed title", null);
+
+        NewFeed inserted = insertedFeedFor(new CreateFeedRequest(URL, "  Custom name  ", Topic.TECH));
+
+        assertThat(inserted.name()).isEqualTo("Custom name");
+    }
+
+    @Test
+    void aBlankRequestedNameFallsBackToTheFeedTitle() {
+        loads("Parsed title", null);
+
+        NewFeed inserted = insertedFeedFor(new CreateFeedRequest(URL, "   ", Topic.TECH));
+
+        assertThat(inserted.name()).isEqualTo("Parsed title");
+    }
+
+    @Test
+    void withNeitherANameNorATitleTheSourceKeyIsTheName() {
+        loads("  ", null);
+
+        NewFeed inserted = insertedFeedFor(request());
+
+        assertThat(inserted.name()).isEqualTo("example.test");
+    }
+
+    @Test
+    void getReturnsTheStoredFeed() {
+        Feed stored = storedFeed();
+        when(feeds.findWithSourceById(9L)).thenReturn(Optional.of(stored));
+
+        assertThat(service.get(9L).id()).isEqualTo(9L);
+    }
+
+    @Test
+    void getOfAnUnknownIdIsFeedNotFound() {
+        when(feeds.findWithSourceById(404L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.get(404L))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.code()).isEqualTo(ErrorCode.FEED_NOT_FOUND);
+                    assertThat(e.getMessage()).isEqualTo("Feed 404 does not exist.");
+                });
     }
 }

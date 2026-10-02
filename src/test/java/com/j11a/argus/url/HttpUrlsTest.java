@@ -24,6 +24,11 @@ class HttpUrlsTest {
     }
 
     @Test
+    void isHttpRejectsASchemelessUrlEvenWithAHost() {
+        assertThat(HttpUrls.isHttp(URI.create("//example.test/feed"))).isFalse();
+    }
+
+    @Test
     void parseHttpTrimsAndReturnsTheUri() {
         assertThat(HttpUrls.parseHttp("  https://example.test/a?b=1 "))
                 .contains(URI.create("https://example.test/a?b=1"));
@@ -56,6 +61,12 @@ class HttpUrlsTest {
     void resolveAgainstAnEmptyPathKeepsTheSlash() {
         assertThat(HttpUrls.resolve(URI.create("https://example.test"), "feed.xml"))
                 .contains(URI.create("https://example.test/feed.xml"));
+    }
+
+    @Test
+    void anAbsoluteReferenceSurvivesAnOpaqueBase() {
+        assertThat(HttpUrls.resolve(URI.create("mailto:ops@example.test"), "https://example.test/feed"))
+                .contains(URI.create("https://example.test/feed"));
     }
 
     @Test

@@ -29,19 +29,15 @@ public final class SourceResolver {
     }
 
     private static @Nullable String normalise(@Nullable String host) {
-        if (host == null || host.isBlank()) {
+        if (host == null) {
             return null;
         }
         String lower = host.strip().toLowerCase(Locale.ROOT);
         return lower.endsWith(".") ? lower.substring(0, lower.length() - 1) : lower;
     }
 
-    private static String stripBrackets(String host) {
-        return host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
-    }
-
     private static String registrableDomain(String host) {
-        if (InetAddresses.isInetAddress(stripBrackets(host))) {
+        if (InetAddresses.isUriInetAddress(host)) {
             return host;
         }
         try {

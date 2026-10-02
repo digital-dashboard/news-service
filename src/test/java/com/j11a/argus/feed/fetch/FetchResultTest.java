@@ -25,6 +25,32 @@ class FetchResultTest {
     }
 
     @Test
+    void fetchedIsNotEqualToNullOrAnotherType() {
+        Fetched fetched = new Fetched(new byte[0], null, URL, null);
+
+        assertThat(fetched).isNotEqualTo(null).isNotEqualTo("fetched");
+    }
+
+    @Test
+    void fetchedDiffersWhenTheContentTypeOrFinalUrlDiffers() {
+        Fetched base = new Fetched(new byte[] {1}, "text/xml", URL, null);
+
+        assertThat(base)
+                .isNotEqualTo(new Fetched(new byte[] {1}, "application/rss+xml", URL, null))
+                .isNotEqualTo(new Fetched(new byte[] {1}, null, URL, null))
+                .isNotEqualTo(new Fetched(new byte[] {1}, "text/xml", URI.create("https://example.test/other"), null));
+    }
+
+    @Test
+    void fetchedToStringShowsSizeTypeAndWhetherThereIsAPermanentTargetButNeverTheUrl() {
+        Fetched plain = new Fetched(new byte[3], null, URL, null);
+        Fetched moved = new Fetched(new byte[5], "text/xml", URL, URI.create("https://example.test/new?token=s3cret"));
+
+        assertThat(plain).hasToString("Fetched[bodyBytes=3, contentType=null, permanentTarget=false]");
+        assertThat(moved).hasToString("Fetched[bodyBytes=5, contentType=text/xml, permanentTarget=true]");
+    }
+
+    @Test
     void failureReasonsExposeLowercaseTags() {
         assertThat(FetchFailureReason.HTTP_STATUS.tag()).isEqualTo("http_status");
         assertThat(FetchFailureReason.TIMEOUT.tag()).isEqualTo("timeout");

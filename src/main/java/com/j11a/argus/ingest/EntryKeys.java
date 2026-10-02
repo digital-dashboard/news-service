@@ -1,9 +1,8 @@
 package com.j11a.argus.ingest;
 
+import com.j11a.argus.crypto.Sha256;
 import com.j11a.argus.url.Links;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import org.jspecify.annotations.Nullable;
 
@@ -29,14 +28,6 @@ public final class EntryKeys {
         if (key == null || key.length() <= MAX_KEY_LENGTH) {
             return key;
         }
-        return HASH_PREFIX + HexFormat.of().formatHex(sha256(key.getBytes(StandardCharsets.UTF_8)));
-    }
-
-    private static byte[] sha256(byte[] input) {
-        try {
-            return MessageDigest.getInstance("SHA-256").digest(input);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is required of every JDK", e);
-        }
+        return HASH_PREFIX + HexFormat.of().formatHex(Sha256.digest(key.getBytes(StandardCharsets.UTF_8)));
     }
 }

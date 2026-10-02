@@ -18,8 +18,15 @@ public final class HealthProbe {
     }
 
     public static void main(String[] args) {
-        URI target = URI.create(args.length > 0 ? args[0] : DEFAULT_URL);
-        System.exit(check(target, TIMEOUT));
+        System.exit(run(args));
+    }
+
+    static int run(String[] args) {
+        return check(targetFrom(args), TIMEOUT);
+    }
+
+    static URI targetFrom(String[] args) {
+        return URI.create(args.length > 0 ? args[0] : DEFAULT_URL);
     }
 
     static int check(URI target, Duration timeout) {

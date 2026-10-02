@@ -47,7 +47,7 @@ public final class FeedParser {
     // SyndFeed.getLink() can return the rel=self link of an Atom feed.
     private static @Nullable String siteLinkOf(SyndFeed feed) {
         return feed.getLinks().stream()
-                .filter(link -> link.getRel() == null || ALTERNATE_REL.equalsIgnoreCase(link.getRel()))
+                .filter(link -> ALTERNATE_REL.equalsIgnoreCase(link.getRel()))
                 .map(SyndLink::getHref)
                 .filter(Objects::nonNull)
                 .findFirst()

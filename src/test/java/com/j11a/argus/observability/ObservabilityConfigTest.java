@@ -6,6 +6,7 @@ import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationFilter;
 import io.micrometer.observation.ObservationPredicate;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.client.observation.ClientRequestObservationContext;
 import org.springframework.http.server.observation.ServerRequestObservationContext;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -50,6 +51,16 @@ class ObservabilityConfigTest {
 
         assertThat(context.getHighCardinalityKeyValue("http.url").getValue())
                 .isEqualTo("https://feeds.example.test:8443/a/b.xml");
+    }
+
+    @Test
+    void clientObservationsWithoutARequestAreLeftAlone() {
+        ObservationFilter filter = new ObservabilityConfig().clientUrlsLoseTheirQueryString();
+        ClientRequestObservationContext context = new ClientRequestObservationContext(null);
+
+        filter.map(context);
+
+        assertThat(context.getHighCardinalityKeyValue("http.url")).isNull();
     }
 
     @Test

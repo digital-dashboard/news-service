@@ -8,8 +8,6 @@ import java.io.InputStream;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.http.HttpTimeoutException;
-import java.util.Arrays;
-import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
@@ -41,23 +39,14 @@ public class FeedFetcher {
     private record Rejected(Failed failure) implements Step {
     }
 
-    private record Body(byte[] bytes, @Nullable String contentType) implements Step {
+    private static final class Body implements Step {
 
-        @Override
-        public boolean equals(Object other) {
-            return other instanceof Body(byte[] otherBytes, String otherContentType)
-                    && Arrays.equals(bytes, otherBytes)
-                    && Objects.equals(contentType, otherContentType);
-        }
+        private final byte[] bytes;
+        private final @Nullable String contentType;
 
-        @Override
-        public int hashCode() {
-            return Objects.hash(Arrays.hashCode(bytes), contentType);
-        }
-
-        @Override
-        public String toString() {
-            return "Body[bytes=" + bytes.length + ", contentType=" + contentType + "]";
+        private Body(byte[] bytes, @Nullable String contentType) {
+            this.bytes = bytes;
+            this.contentType = contentType;
         }
     }
 
@@ -87,8 +76,8 @@ public class FeedFetcher {
             if (step instanceof Rejected(var rejection)) {
                 return rejection;
             }
-            if (step instanceof Body(var bytes, var contentType)) {
-                return new Fetched(bytes, contentType, current, permanentTarget);
+            if (step instanceof Body body) {
+                return new Fetched(body.bytes, body.contentType, current, permanentTarget);
             }
             Hop hop = nextHop(current, (Redirect) step, redirects);
             if (hop instanceof Stop(var stopped)) {

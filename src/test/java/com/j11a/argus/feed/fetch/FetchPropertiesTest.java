@@ -35,6 +35,21 @@ class FetchPropertiesTest {
     }
 
     @Test
+    void aMissingBodySizeFailsOnlyTheNotNullConstraint() {
+        assertThat(VALIDATOR.validate(new FetchProperties("a", null, 5)))
+                .singleElement()
+                .satisfies(violation -> assertThat(violation.getPropertyPath()).hasToString("maxBodySize"));
+    }
+
+    @Test
+    void aNegativeBodySizeIsRejectedWithTheBodySizeMessage() {
+        assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofBytes(-1), 5)))
+                .singleElement()
+                .satisfies(violation -> assertThat(violation.getMessage())
+                        .isEqualTo("argus.fetch.max-body-size must be positive"));
+    }
+
+    @Test
     void rejectsBlankUserAgentNonPositiveSizeAndOutOfRangeRedirects() {
         assertThat(VALIDATOR.validate(new FetchProperties(" ", DataSize.ofMegabytes(1), 5))).hasSize(1);
         assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofBytes(0), 5))).hasSize(1);

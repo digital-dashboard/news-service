@@ -136,6 +136,14 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void anElementOfTheWrongTypeInsideAListHasNoFieldNameSoItIsBadRequest() throws Exception {
+        mockMvc.perform(post(PROBE + "/list").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("[{}]"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+    }
+
+    @Test
     void bodyOfTheWrongShapeWithoutAFieldIsBadRequest() throws Exception {
         mockMvc.perform(post(PROBE + "/mode").header(AdminKeys.HEADER, AdminKeys.VALID)
                         .contentType(MediaType.APPLICATION_JSON).content("[]"))

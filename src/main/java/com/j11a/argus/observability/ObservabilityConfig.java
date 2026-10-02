@@ -36,14 +36,10 @@ public class ObservabilityConfig {
     // Built by hand: the multi-argument URI constructors re-quote every "%", turning %20 into %2520.
     static String withoutQuery(URI uri) {
         String host = uri.getHost();
-        StringBuilder url = new StringBuilder(uri.getScheme()).append("://")
-                .append(host.contains(":") && !host.startsWith("[") ? "[" + host + "]" : host);
+        StringBuilder url = new StringBuilder(uri.getScheme()).append("://").append(host);
         if (uri.getPort() != -1) {
             url.append(':').append(uri.getPort());
         }
-        if (uri.getRawPath() != null) {
-            url.append(uri.getRawPath());
-        }
-        return url.toString();
+        return url.append(uri.getRawPath()).toString();
     }
 }

@@ -25,9 +25,7 @@ public final class Links {
         if (uri.getPort() != -1) {
             cleaned.append(':').append(uri.getPort());
         }
-        if (uri.getRawPath() != null) {
-            cleaned.append(uri.getRawPath());
-        }
+        cleaned.append(uri.getRawPath());
         if (uri.getRawQuery() != null) {
             cleaned.append('?').append(uri.getRawQuery());
         }

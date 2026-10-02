@@ -4,6 +4,7 @@ import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,6 +68,11 @@ public class ProbeController {
     @PostMapping("/mode")
     public String mode(@RequestBody ModeRequest request) {
         return request.mode().name();
+    }
+
+    @PostMapping("/list")
+    public int list(@RequestBody List<String> items) {
+        return items.size();
     }
 
     @GetMapping("/boom")
