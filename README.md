@@ -6,8 +6,8 @@ Argus is the news-aggregation service of the Artemis dashboard. It is a Spring B
 
 | Variable | Swarm secret file | Required | Purpose |
 |---|---|---|---|
-| `ARGUS_DB_URL` | | yes | JDBC URL, e.g. `jdbc:postgresql://pgbouncer:6432/argus` |
-| `ARGUS_DB_USERNAME` | `argus_db_username` | yes | Database user |
+| `ARGUS_DB_URL` | | yes | JDBC URL, e.g. `jdbc:postgresql://pgbouncer:5432/argus` |
+| `ARGUS_DB_USERNAME` | | yes | Database user; plain environment variable (a secret file is accepted but not needed) |
 | `ARGUS_DB_PASSWORD` | `argus_db_password` | yes | Database password |
 | `ARGUS_ADMIN_KEY` | `argus_admin_key` | yes | Admin API key, at least 32 characters |
 | `ARGUS_OTLP_BASE_URL` | | no | OTLP base URL without a path, default `http://tempo:4318`; Argus appends `/v1/traces` |
