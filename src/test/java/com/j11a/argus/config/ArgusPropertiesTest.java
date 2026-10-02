@@ -21,7 +21,8 @@ class ArgusPropertiesTest {
             "argus.db.password=db-password-value",
             "argus.admin.key=" + KEY_32,
             "argus.telemetry.otlp-base-url=http://tempo:4318",
-            "argus.telemetry.sampling-probability=1.0");
+            "argus.telemetry.sampling-probability=1.0",
+            "argus.fetch.user-agent=Argus/test");
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(ArgusConfiguration.class);

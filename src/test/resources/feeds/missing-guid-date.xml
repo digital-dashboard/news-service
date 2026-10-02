@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Sparse Feed</title>
+    <link>https://sparse.example.test/</link>
+    <description>Entries with little metadata</description>
+    <item>
+      <title>   </title>
+      <link>  https://sparse.example.test/a  </link>
+      <description>Only a link.</description>
+    </item>
+    <item>
+      <title>No identity at all</title>
+      <description>No link, no guid, no date.</description>
+    </item>
+    <item>
+      <title>Guid only</title>
+      <guid>  urn:sparse:3  </guid>
+    </item>
+  </channel>
+</rss>

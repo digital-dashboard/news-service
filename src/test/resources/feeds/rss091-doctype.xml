@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!DOCTYPE rss PUBLIC "-//Netscape Communications//DTD RSS 0.91//EN" "http://my.netscape.com/publish/formats/rss-0.91.dtd">
+<rss version="0.91">
+  <channel>
+    <title>Plain Old Feed</title>
+    <link>https://plain.example.test/</link>
+    <description>RSS 0.91 with the Netscape DOCTYPE</description>
+    <language>en-us</language>
+    <item>
+      <title>Item one</title>
+      <link>https://plain.example.test/one</link>
+      <description>First item.</description>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed version="0.3" xmlns="http://purl.org/atom/ns#" xml:lang="en">
+  <title>Old Atom Notes</title>
+  <link rel="alternate" type="text/html" href="https://old.example.test/"/>
+  <modified>2026-09-01T10:00:00Z</modified>
+  <author><name>Pat Lee</name></author>
+  <entry>
+    <title>A note from the past</title>
+    <link rel="alternate" type="text/html" href="https://old.example.test/note-1"/>
+    <id>urn:old:note-1</id>
+    <issued>2026-09-01T09:00:00Z</issued>
+    <modified>2026-09-01T10:00:00Z</modified>
+    <summary>Atom 0.3 still exists in the wild.</summary>
+  </entry>
+</feed>

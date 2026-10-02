@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="fr">
+  <title>Journal du port</title>
+  <subtitle>Nouvelles locales</subtitle>
+  <link href="https://port.example.test/" rel="alternate" type="text/html"/>
+  <link href="https://port.example.test/atom.xml" rel="self" type="application/atom+xml"/>
+  <updated>2026-10-05T12:00:00Z</updated>
+  <author><name>Redaction du port</name></author>
+  <id>tag:port.example.test,2026:feed</id>
+  <entry>
+    <title>Le marche reouvre</title>
+    <link href="https://port.example.test/marche-reouvre" rel="alternate" type="text/html"/>
+    <id>tag:port.example.test,2026:entry-1</id>
+    <published>2026-10-01T08:00:00Z</published>
+    <updated>2026-10-02T09:30:00Z</updated>
+    <author><name>Amélie Roy</name></author>
+    <category term="Economie"/>
+    <category term="Local" label="Local news"/>
+    <summary type="html">&lt;p&gt;Le marche couvert &lt;b&gt;reouvre&lt;/b&gt; ses portes.&lt;/p&gt;</summary>
+  </entry>
+  <entry>
+    <title>Digue en travaux</title>
+    <link href="https://port.example.test/digue-travaux"/>
+    <id>tag:port.example.test,2026:entry-2</id>
+    <updated>2026-10-03T10:00:00Z</updated>
+    <summary>Des travaux sont prevus jusqu'en novembre.</summary>
+  </entry>
+</feed>

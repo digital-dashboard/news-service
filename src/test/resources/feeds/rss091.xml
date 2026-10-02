@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<rss version="0.91">
+  <channel>
+    <title>Plain Old Feed</title>
+    <link>https://plain.example.test/</link>
+    <description>RSS 0.91 without a DOCTYPE</description>
+    <language>en-us</language>
+    <item>
+      <title>Item one</title>
+      <link>https://plain.example.test/one</link>
+      <description>First item.</description>
+    </item>
+  </channel>
+</rss>

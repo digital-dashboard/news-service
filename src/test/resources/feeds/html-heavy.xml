@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Markup Daily</title>
+    <link>https://markup.example.test/</link>
+    <description>HTML in descriptions</description>
+    <item>
+      <title>Heavy markup</title>
+      <link>https://markup.example.test/heavy</link>
+      <guid>heavy-1</guid>
+      <description><![CDATA[<div class="lead"><p>Council &amp; residents met on <em>Monday</em> to discuss the <a href="https://markup.example.test/plan">harbour plan</a>&nbsp;&mdash; a proposal that has divided opinion.</p><ul><li>Cost: &pound;4m</li><li>Timeline: <b>three</b> years</li></ul><script>alert('x')</script><p>Supporters argue the redevelopment will bring jobs, while opponents worry about traffic, noise and the loss of the old fish market that has traded on the quay for generations. A second public meeting is scheduled for next month, and the council has promised to publish every written submission before the vote takes place in the chamber.</p><p>Further reading &lt;here&gt; and elsewhere, with many more words to push past the limit: alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega.</p></div>]]></description>
+    </item>
+  </channel>
+</rss>

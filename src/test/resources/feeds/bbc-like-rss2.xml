@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/" version="2.0">
+  <channel>
+    <title><![CDATA[Harbour Times - World]]></title>
+    <description><![CDATA[Harbour Times - World]]></description>
+    <link>https://news.example.test/world</link>
+    <image>
+      <url>https://news.example.test/logo.gif</url>
+      <title>Harbour Times - World</title>
+      <link>https://news.example.test/world</link>
+    </image>
+    <generator>RSS for Node</generator>
+    <lastBuildDate>Tue, 06 Oct 2026 08:15:00 GMT</lastBuildDate>
+    <atom:link href="https://feeds.example.test/world/rss.xml" rel="self" type="application/rss+xml"/>
+    <copyright><![CDATA[Copyright: Harbour Times 2026]]></copyright>
+    <language><![CDATA[en-gb]]></language>
+    <item>
+      <title><![CDATA[Ferry service resumes after storm]]></title>
+      <description><![CDATA[Crossings restart on Wednesday morning after two days of cancellations.]]></description>
+      <link>https://news.example.test/world/articles/c1abc?at_medium=RSS&amp;at_campaign=rss</link>
+      <guid isPermaLink="false">https://news.example.test/world/articles/c1abc#0</guid>
+      <pubDate>Tue, 06 Oct 2026 07:30:00 GMT</pubDate>
+      <media:thumbnail width="240" height="135" url="https://img.example.test/c1abc/240.jpg"/>
+    </item>
+    <item>
+      <title><![CDATA[Harvest figures beat forecasts]]></title>
+      <description><![CDATA[Farmers report yields well above the spring estimate.]]></description>
+      <link>https://news.example.test/world/articles/c2def</link>
+      <guid isPermaLink="false">https://news.example.test/world/articles/c2def#0</guid>
+      <pubDate>Mon, 05 Oct 2026 18:05:00 GMT</pubDate>
+      <media:thumbnail width="240" height="135" url="https://img.example.test/c2def/240.jpg"/>
+    </item>
+  </channel>
+</rss>

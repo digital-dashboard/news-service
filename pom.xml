@@ -21,6 +21,10 @@
         <logback.version>1.6.3</logback.version>
         <tomcat.version>11.0.26</tomcat.version>
 
+        <rome.version>2.1.0</rome.version>
+        <jsoup.version>1.23.2</jsoup.version>
+        <guava.version>33.7.2-jre</guava.version>
+
         <jacoco.version>0.8.15</jacoco.version>
         <jacoco.line.minimum>0.80</jacoco.line.minimum>
         <!-- Same exclusions in two syntaxes: JaCoCo class-path globs and Sonar source globs. Keep them in step. -->
@@ -64,6 +68,30 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-liquibase</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-restclient</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.rometools</groupId>
+            <artifactId>rome</artifactId>
+            <version>${rome.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.rometools</groupId>
+            <artifactId>rome-modules</artifactId>
+            <version>${rome.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>${jsoup.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>${guava.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

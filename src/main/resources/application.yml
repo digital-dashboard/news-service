@@ -28,6 +28,12 @@ spring:
       add-mappings: false
   lifecycle:
     timeout-per-shutdown-phase: 30s
+  http:
+    clients:
+      connect-timeout: ${ARGUS_FETCH_CONNECT_TIMEOUT:5s}
+      read-timeout: ${ARGUS_FETCH_READ_TIMEOUT:15s}
+      # FeedFetcher follows redirects itself so it can validate every hop.
+      redirects: dont-follow
 
 server:
   port: 8080
@@ -41,6 +47,11 @@ argus:
     password: ${ARGUS_DB_PASSWORD:${argus_db_password:}}
   admin:
     key: ${ARGUS_ADMIN_KEY:${argus_admin_key:}}
+  fetch:
+    # Not Maven-filtered: the version here is a literal.
+    user-agent: ${ARGUS_FETCH_USER_AGENT:Argus/0.1 (self-hosted RSS aggregator)}
+    max-body-size: ${ARGUS_FETCH_MAX_BODY_SIZE:5MB}
+    max-redirects: ${ARGUS_FETCH_MAX_REDIRECTS:5}
   telemetry:
     otlp-base-url: ${ARGUS_OTLP_BASE_URL:http://tempo:4318}
     sampling-probability: ${ARGUS_TRACING_SAMPLING_PROBABILITY:1.0}
