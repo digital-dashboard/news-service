@@ -44,6 +44,8 @@ public final class HealthProbe {
         return fail(e.getMessage() == null ? type : type + ": " + e.getMessage());
     }
 
+    // The probe is a dependency-free class run by the Docker HEALTHCHECK, so a logger is inappropriate.
+    @SuppressWarnings("java:S106")
     private static int fail(String reason) {
         System.err.println("health probe failed: " + reason);
         return 1;

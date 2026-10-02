@@ -15,16 +15,17 @@ class MetricCatalogueTest {
 
     @Test
     void allowedTagsExcludeLabelsPrometheusAddsItself() {
-        assertThat(MetricCatalogue.ALLOWED_TAGS).doesNotContain("job", "instance", "service");
-        assertThat(MetricCatalogue.ALLOWED_TAGS).contains(MetricNames.Tags.SCHEDULED_JOB);
+        assertThat(MetricCatalogue.allowedTags())
+                .doesNotContain("job", "instance", "service")
+                .contains(MetricNames.Tags.SCHEDULED_JOB);
     }
 
     @Test
     void catalogueSpecsAreUniquelyNamedUnderThePrefixAndUseAllowedTags() {
-        List<String> names = MetricCatalogue.ALL.stream().map(MeterSpec::name).toList();
+        List<String> names = MetricCatalogue.all().stream().map(MeterSpec::name).toList();
 
         assertThat(names).doesNotHaveDuplicates().allMatch(name -> name.startsWith(MetricNames.PREFIX + "."));
-        MetricCatalogue.ALL.forEach(spec -> assertThat(MetricCatalogue.ALLOWED_TAGS).containsAll(spec.tags()));
+        MetricCatalogue.all().forEach(spec -> assertThat(MetricCatalogue.allowedTags()).containsAll(spec.tags()));
     }
 
     @Test
@@ -62,10 +63,10 @@ class MetricCatalogueTest {
 
     @Test
     void cataloguesThePhaseTwoIngestMeters() {
-        assertThat(MetricCatalogue.ALL).extracting(MeterSpec::name).containsExactlyInAnyOrder(
+        assertThat(MetricCatalogue.all()).extracting(MeterSpec::name).containsExactlyInAnyOrder(
                 MetricNames.FETCH, MetricNames.INGEST, MetricNames.FETCH_SIZE, MetricNames.INGEST_ENTRIES,
                 MetricNames.PARSE_MISSING);
-        assertThat(MetricCatalogue.ALL).filteredOn(spec -> spec.name().equals(MetricNames.FETCH_SIZE))
+        assertThat(MetricCatalogue.all()).filteredOn(spec -> spec.name().equals(MetricNames.FETCH_SIZE))
                 .singleElement().satisfies(spec -> assertThat(spec.prometheusBase())
                         .isEqualTo("argus_fetch_size_bytes"));
     }

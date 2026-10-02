@@ -11,6 +11,8 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -19,10 +21,12 @@ class HealthProbeTest {
     private static final String LIVENESS_PATH = "/actuator/health/liveness";
     private static final Duration SHORT_TIMEOUT = Duration.ofMillis(500);
 
+    private final CountDownLatch released = new CountDownLatch(1);
     private HttpServer server;
 
     @AfterEach
     void stopServer() {
+        released.countDown();
         if (server != null) {
             server.stop(0);
         }
@@ -32,7 +36,7 @@ class HealthProbeTest {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext(LIVENESS_PATH, exchange -> {
             try {
-                Thread.sleep(delayMillis);
+                released.await(delayMillis, TimeUnit.MILLISECONDS);
                 exchange.sendResponseHeaders(status, -1);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -97,6 +101,11 @@ class HealthProbeTest {
 
     @Test
     void defaultTargetIsTheLivenessGroupOnPort8080() {
-        assertThat(HealthProbe.DEFAULT_URL).isEqualTo("http://localhost:8080" + LIVENESS_PATH);
+        URI target = URI.create(HealthProbe.DEFAULT_URL);
+
+        assertThat(target.getScheme()).isEqualTo("http");
+        assertThat(target.getHost()).isEqualTo("localhost");
+        assertThat(target.getPort()).isEqualTo(8080);
+        assertThat(target.getPath()).isEqualTo(LIVENESS_PATH);
     }
 }

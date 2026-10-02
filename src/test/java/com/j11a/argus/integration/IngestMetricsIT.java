@@ -123,7 +123,7 @@ class IngestMetricsIT extends AbstractIntegrationTest {
     void everyCataloguedMeterExistsWithExactlyTheCataloguedTags() {
         create();
 
-        for (MeterSpec spec : MetricCatalogue.ALL) {
+        for (MeterSpec spec : MetricCatalogue.all()) {
             Set<Meter> meters = registry.getMeters().stream()
                     .filter(meter -> meter.getId().getName().equals(spec.name()))
                     .collect(Collectors.toSet());

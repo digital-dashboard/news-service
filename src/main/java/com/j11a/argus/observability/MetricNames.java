@@ -31,10 +31,14 @@ public final class MetricNames {
         public static final String KIND = "kind";
         public static final String STATE = "state";
 
-        public static final Set<String> ALL = Set.of(
+        private static final Set<String> ALL = Set.of(
                 SOURCE, FEED, FEED_ID, WATCH, TRIGGER, OUTCOME, REASON, DECISION, TYPE, SCHEDULED_JOB, KIND, STATE);
 
         private Tags() {
+        }
+
+        public static Set<String> all() {
+            return ALL;
         }
     }
 }

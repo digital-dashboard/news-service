@@ -32,7 +32,7 @@ class ArgusDashboardTest {
 
     @Test
     void committedDashboardPassesValidation() {
-        List<Violation> violations = new DashboardValidator(MetricCatalogue.ALL, REQUIRED_VARIABLES, true).validate(dashboard);
+        List<Violation> violations = new DashboardValidator(MetricCatalogue.all(), REQUIRED_VARIABLES, true).validate(dashboard);
 
         assertThat(violations).isEmpty();
     }

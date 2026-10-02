@@ -28,6 +28,8 @@ public class SecurityConfig {
 
     private static final RequestMatcher WRITES = request -> !SAFE_METHODS.contains(request.getMethod());
 
+    // CSRF is safe to disable: the API is stateless and authenticates by header key, with no cookies or sessions.
+    @SuppressWarnings("java:S4502")
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, ArgusProperties properties,
             @Qualifier("handlerExceptionResolver") HandlerExceptionResolver resolver) {

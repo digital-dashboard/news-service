@@ -16,8 +16,8 @@ class AllowedSeriesTest {
 
         assertThat(allowed).contains(
                 "http_server_requests_seconds_bucket", "http_server_requests_seconds_count",
-                "http_server_requests_seconds_sum", "http_server_requests_seconds_max");
-        assertThat(allowed).doesNotContain("http_server_requests_seconds", "http_server_requests_seconds_foo");
+                "http_server_requests_seconds_sum", "http_server_requests_seconds_max")
+                .doesNotContain("http_server_requests_seconds", "http_server_requests_seconds_foo");
     }
 
     @Test
@@ -25,8 +25,8 @@ class AllowedSeriesTest {
         Set<String> allowed = AllowedSeries.of(List.of());
 
         assertThat(allowed).contains("jvm_memory_used_bytes", "hikaricp_connections_active", "pg_up", "up",
-                "pg_stat_database_xact_commit", "container_cpu_usage_seconds_total");
-        assertThat(allowed).doesNotContain("jvm_memory_used_bytes_count", "hikaricp_connections", "uploads_total",
+                "pg_stat_database_xact_commit", "container_cpu_usage_seconds_total")
+                .doesNotContain("jvm_memory_used_bytes_count", "hikaricp_connections", "uploads_total",
                 "pg_stat_database_xact_commit_total");
     }
 

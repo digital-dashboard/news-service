@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 import tools.jackson.core.JacksonException.Reference;
 import tools.jackson.databind.exc.MismatchedInputException;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.TypeMismatchException;
@@ -53,8 +54,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @Override
-    protected ResponseEntity<Object> handleExceptionInternal(
-            Exception ex, Object body, HttpHeaders headers, HttpStatusCode statusCode, WebRequest request) {
+    protected @Nullable ResponseEntity<Object> handleExceptionInternal(
+            Exception ex, @Nullable Object body, HttpHeaders headers, HttpStatusCode statusCode, WebRequest request) {
         Object problemBody = body == null && ex instanceof ErrorResponse errorResponse ? errorResponse.getBody() : body;
         if (problemBody instanceof ProblemDetail problem && !Problems.hasCode(problem)) {
             Problems.applyContract(problem, ErrorCode.forStatus(statusCode));
@@ -63,7 +64,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @Override
-    protected ResponseEntity<Object> handleMethodArgumentNotValid(
+    protected @Nullable ResponseEntity<Object> handleMethodArgumentNotValid(
             MethodArgumentNotValidException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         List<FieldProblem> errors = ex.getBindingResult().getAllErrors().stream()
                 .map(error -> new FieldProblem(
@@ -74,7 +75,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @Override
-    protected ResponseEntity<Object> handleHandlerMethodValidationException(
+    protected @Nullable ResponseEntity<Object> handleHandlerMethodValidationException(
             HandlerMethodValidationException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         List<FieldProblem> errors = ex.getParameterValidationResults().stream()
                 .flatMap(result -> result.getResolvableErrors().stream()
@@ -86,7 +87,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @Override
-    protected ResponseEntity<Object> handleTypeMismatch(
+    protected @Nullable ResponseEntity<Object> handleTypeMismatch(
             TypeMismatchException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         String field = ex instanceof MethodArgumentTypeMismatchException mismatch
                 ? mismatch.getName() : String.valueOf(ex.getPropertyName());
@@ -94,7 +95,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @Override
-    protected ResponseEntity<Object> handleMissingServletRequestParameter(
+    protected @Nullable ResponseEntity<Object> handleMissingServletRequestParameter(
             MissingServletRequestParameterException ex, HttpHeaders headers, HttpStatusCode status,
             WebRequest request) {
         FieldProblem error = new FieldProblem(ex.getParameterName(), "parameter is required");
@@ -102,7 +103,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @Override
-    protected ResponseEntity<Object> handleHttpMessageNotReadable(
+    protected @Nullable ResponseEntity<Object> handleHttpMessageNotReadable(
             HttpMessageNotReadableException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         if (ex.getCause() instanceof MismatchedInputException mismatch && !mismatch.getPath().isEmpty()) {
             String field = mismatch.getPath().stream()
@@ -116,7 +117,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return super.handleHttpMessageNotReadable(ex, headers, status, request);
     }
 
-    private ResponseEntity<Object> validationFailed(
+    private @Nullable ResponseEntity<Object> validationFailed(
             Exception ex, HttpHeaders headers, HttpStatusCode status, WebRequest request, List<FieldProblem> errors) {
         ProblemDetail problem = Problems.of(ErrorCode.VALIDATION_FAILED, ErrorCode.VALIDATION_FAILED.title());
         problem.setProperty(Problems.ERRORS_PROPERTY, errors);
