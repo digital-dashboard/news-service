@@ -27,6 +27,9 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+// S2638 false positive: Spring 7 declares these handler returns @Nullable as a type-use annotation, which Sonar
+// does not read, so it treats the overrides' matching @Nullable returns as loosening a non-null contract.
+@SuppressWarnings("java:S2638")
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 

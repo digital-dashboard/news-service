@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -62,12 +63,12 @@ public class ArticleInserter {
     }
 
     private long existingId(NewArticle article) {
-        return jdbc.sql(SELECT_EXISTING)
+        Long id = jdbc.sql(SELECT_EXISTING)
                 .param("sourceId", article.sourceId())
                 .param("guidKey", article.guidKey())
                 .query(Long.class)
-                .optional()
-                .orElseThrow();
+                .single();
+        return Objects.requireNonNull(id, "conflicting article row has no id");
     }
 
     private static @Nullable OffsetDateTime utc(@Nullable Instant instant) {

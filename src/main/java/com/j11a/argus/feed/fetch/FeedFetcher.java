@@ -45,9 +45,9 @@ public class FeedFetcher {
 
         @Override
         public boolean equals(Object other) {
-            return other instanceof Body that
-                    && Arrays.equals(bytes, that.bytes)
-                    && Objects.equals(contentType, that.contentType);
+            return other instanceof Body(byte[] otherBytes, String otherContentType)
+                    && Arrays.equals(bytes, otherBytes)
+                    && Objects.equals(contentType, otherContentType);
         }
 
         @Override
