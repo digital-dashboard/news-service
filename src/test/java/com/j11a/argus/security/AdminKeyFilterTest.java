@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.j11a.argus.testsupport.AdminKeys;
 import jakarta.servlet.FilterChain;
-import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -69,7 +68,7 @@ class AdminKeyFilterTest {
             request.addHeader(AdminKeys.HEADER, key);
         }
         Authentication[] seen = new Authentication[1];
-        FilterChain chain = (HttpServletRequest, response) ->
+        FilterChain chain = (servletRequest, response) ->
                 seen[0] = SecurityContextHolder.getContext().getAuthentication();
         filter.doFilter(request, new MockHttpServletResponse(), chain);
         SecurityContextHolder.clearContext();

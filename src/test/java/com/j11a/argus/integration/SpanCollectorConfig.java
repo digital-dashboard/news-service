@@ -24,6 +24,7 @@ public class SpanCollectorConfig {
 
         @Override
         public void onStart(Context parentContext, ReadWriteSpan span) {
+            // Only finished spans are collected, so there is nothing to do when a span starts.
         }
 
         @Override

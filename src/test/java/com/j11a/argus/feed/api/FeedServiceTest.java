@@ -59,7 +59,8 @@ class FeedServiceTest {
         Feed feed = mock(Feed.class);
         when(feed.getId()).thenReturn(9L);
         when(feed.getUrl()).thenReturn(URL);
-        when(feed.getSource()).thenReturn(mock(Source.class));
+        Source source = mock(Source.class);
+        when(feed.getSource()).thenReturn(source);
         return feed;
     }
 

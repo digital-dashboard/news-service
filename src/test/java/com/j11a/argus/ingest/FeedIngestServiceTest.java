@@ -59,7 +59,9 @@ class FeedIngestServiceTest {
     void whenPersistFailsNeitherCounterIsRecorded() {
         when(persister.persist(any(), any(), any())).thenThrow(new IllegalStateException("db down"));
 
-        assertThatThrownBy(() -> service.ingestParsed(feed, oneEntryWithNothingOptional(), FETCHED_AT))
+        ParsedFeed parsedFeed = oneEntryWithNothingOptional();
+
+        assertThatThrownBy(() -> service.ingestParsed(feed, parsedFeed, FETCHED_AT))
                 .isInstanceOf(IllegalStateException.class);
 
         assertThat(registry.find(MetricNames.PARSE_MISSING).counters()).isEmpty();

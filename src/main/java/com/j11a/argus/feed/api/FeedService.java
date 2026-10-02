@@ -87,8 +87,8 @@ public class FeedService {
         // site-link key that refreshes use.
         return switch (loader.load(uri, SourceResolver.keyFor(null, uri))) {
             case FeedLoader.Loaded.Parsed parsed -> parsed;
-            case FeedLoader.Loaded.Failed failed ->
-                    throw new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", failed.reason()));
+            case FeedLoader.Loaded.Failed(var reason) ->
+                    throw new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", reason));
         };
     }
 
@@ -99,8 +99,9 @@ public class FeedService {
     }
 
     private static String nameFor(CreateFeedRequest request, ParsedFeed parsed, Source source) {
-        if (request.name() != null && !request.name().isBlank()) {
-            return request.name().strip();
+        String requested = request.name();
+        if (requested != null && !requested.isBlank()) {
+            return requested.strip();
         }
         return parsed.title().isBlank() ? source.getKey() : truncated(parsed.title());
     }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -47,7 +48,7 @@ class ArticlePersisterTest {
         persister.persist(feed, List.of(entry("c", null), entry("a", null), entry("b", null)), FETCHED_AT);
 
         ArgumentCaptor<NewArticle> articles = ArgumentCaptor.forClass(NewArticle.class);
-        verify(inserter, org.mockito.Mockito.times(3)).insert(articles.capture(), anyLong());
+        verify(inserter, times(3)).insert(articles.capture(), anyLong());
         assertThat(articles.getAllValues()).extracting(NewArticle::guidKey).containsExactly("a", "b", "c");
     }
 

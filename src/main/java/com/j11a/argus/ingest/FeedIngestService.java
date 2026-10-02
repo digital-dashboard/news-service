@@ -42,8 +42,8 @@ public class FeedIngestService {
         return ingest(feed, () -> {
             FeedLoader.Loaded loaded = loader.load(URI.create(feed.getUrl()), feed.getSource().getKey());
             return switch (loaded) {
-                case FeedLoader.Loaded.Parsed parsed -> persist(feed, parsed.feed(), parsed.fetchedAt());
-                case FeedLoader.Loaded.Failed failed -> IngestReport.failed(feed.getId(), failed.reason());
+                case FeedLoader.Loaded.Parsed(var parsedFeed, var fetchedAt) -> persist(feed, parsedFeed, fetchedAt);
+                case FeedLoader.Loaded.Failed(var reason) -> IngestReport.failed(feed.getId(), reason);
             };
         });
     }

@@ -1,4 +1,6 @@
 package com.j11a.argus.web.error;
 
-public record FieldProblem(String field, String message) {
+import org.jspecify.annotations.Nullable;
+
+public record FieldProblem(String field, @Nullable String message) {
 }

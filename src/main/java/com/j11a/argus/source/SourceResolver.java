@@ -36,8 +36,12 @@ public final class SourceResolver {
         return lower.endsWith(".") ? lower.substring(0, lower.length() - 1) : lower;
     }
 
+    private static String stripBrackets(String host) {
+        return host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+    }
+
     private static String registrableDomain(String host) {
-        if (InetAddresses.isInetAddress(host.replaceAll("^\\[|]$", ""))) {
+        if (InetAddresses.isInetAddress(stripBrackets(host))) {
             return host;
         }
         try {

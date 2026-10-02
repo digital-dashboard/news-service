@@ -16,11 +16,11 @@ public sealed interface FetchResult {
 
         @Override
         public boolean equals(Object other) {
-            return other instanceof Fetched that
-                    && Arrays.equals(body, that.body)
-                    && Objects.equals(contentType, that.contentType)
-                    && finalUrl.equals(that.finalUrl)
-                    && Objects.equals(permanentTarget, that.permanentTarget);
+            return other instanceof Fetched(var otherBody, var otherType, var otherUrl, var otherTarget)
+                    && Arrays.equals(body, otherBody)
+                    && Objects.equals(contentType, otherType)
+                    && finalUrl.equals(otherUrl)
+                    && Objects.equals(permanentTarget, otherTarget);
         }
 
         @Override

@@ -15,6 +15,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
 /** Loopback HTTP server that stands in for a feed host; records every request it receives. */
 public final class FeedStubServer implements AutoCloseable {
@@ -145,11 +147,7 @@ public final class FeedStubServer implements AutoCloseable {
     }
 
     private static void sleep(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(millis));
     }
 
     public static byte[] utf8(String text) {

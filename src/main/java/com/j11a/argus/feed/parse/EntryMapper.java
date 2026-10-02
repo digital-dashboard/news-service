@@ -11,7 +11,6 @@ import com.rometools.rome.feed.synd.SyndFeed;
 import java.net.URI;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
@@ -59,8 +58,8 @@ final class EntryMapper {
                 author != null ? author : feedAuthor,
                 ImageSelector.select(entry, base),
                 categories(entry),
-                toInstant(entry.getPublishedDate()),
-                toInstant(entry.getUpdatedDate()));
+                publishedAt(entry),
+                updatedAt(entry));
     }
 
     private static String excerpt(SyndEntry entry) {
@@ -90,7 +89,13 @@ final class EntryMapper {
                 .toList();
     }
 
-    private static @Nullable Instant toInstant(@Nullable Date date) {
-        return date == null ? null : date.toInstant();
+    private static @Nullable Instant publishedAt(SyndEntry entry) {
+        var published = entry.getPublishedDate();
+        return published == null ? null : published.toInstant();
+    }
+
+    private static @Nullable Instant updatedAt(SyndEntry entry) {
+        var updated = entry.getUpdatedDate();
+        return updated == null ? null : updated.toInstant();
     }
 }

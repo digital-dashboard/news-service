@@ -198,11 +198,12 @@ class FeedParserTest {
         ParsedFeed feed = parse("html-heavy.xml");
 
         String excerpt = feed.entries().get(0).excerpt();
-        assertThat(excerpt).startsWith("Council & residents met on Monday to discuss the harbour plan — a proposal");
-        assertThat(excerpt).contains("Cost: £4m Timeline: three years");
-        assertThat(excerpt).doesNotContain("<p>").doesNotContain("<div").doesNotContain("alert(");
+        assertThat(excerpt)
+                .startsWith("Council & residents met on Monday to discuss the harbour plan — a proposal")
+                .contains("Cost: £4m Timeline: three years")
+                .doesNotContain("<p>").doesNotContain("<div").doesNotContain("alert(")
+                .endsWith("…");
         assertThat(excerpt.length()).isLessThanOrEqualTo(ExcerptBuilder.MAX_EXCERPT_LENGTH + 1);
-        assertThat(excerpt).endsWith("…");
     }
 
     @Test

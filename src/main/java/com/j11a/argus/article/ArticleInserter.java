@@ -66,7 +66,8 @@ public class ArticleInserter {
                 .param("sourceId", article.sourceId())
                 .param("guidKey", article.guidKey())
                 .query(Long.class)
-                .single();
+                .optional()
+                .orElseThrow();
     }
 
     private static @Nullable OffsetDateTime utc(@Nullable Instant instant) {

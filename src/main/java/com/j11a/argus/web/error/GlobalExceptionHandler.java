@@ -43,7 +43,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     /** Spring Security's ExceptionTranslationFilter owns these; the catch-all below would turn them into a 500. */
     @ExceptionHandler({AuthenticationException.class, AccessDeniedException.class})
-    void rethrowSecurityException(Exception ex) throws Exception {
+    void rethrowSecurityException(RuntimeException ex) {
         throw ex;
     }
 

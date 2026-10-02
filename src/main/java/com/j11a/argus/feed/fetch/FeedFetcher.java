@@ -8,6 +8,8 @@ import java.io.InputStream;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.http.HttpTimeoutException;
+import java.util.Arrays;
+import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
@@ -40,6 +42,32 @@ public class FeedFetcher {
     }
 
     private record Body(byte[] bytes, @Nullable String contentType) implements Step {
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof Body that
+                    && Arrays.equals(bytes, that.bytes)
+                    && Objects.equals(contentType, that.contentType);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(Arrays.hashCode(bytes), contentType);
+        }
+
+        @Override
+        public String toString() {
+            return "Body[bytes=" + bytes.length + ", contentType=" + contentType + "]";
+        }
+    }
+
+    private sealed interface Hop {
+    }
+
+    private record Move(URI next, boolean permanent) implements Hop {
+    }
+
+    private record Stop(Failed failure) implements Hop {
     }
 
     private final RestClient client;
@@ -55,38 +83,47 @@ public class FeedFetcher {
         URI permanentTarget = null;
         boolean permanentChain = true;
         for (int redirects = 0; ; redirects++) {
-            if (!HttpUrls.isHttp(current) || HttpUrls.hasUserInfo(current)) {
-                return new Failed(FetchFailureReason.INVALID_URL, null);
+            Step step = attempt(current);
+            if (step instanceof Rejected(var rejection)) {
+                return rejection;
             }
-            Step step;
-            try {
-                step = request(current);
-            } catch (RestClientException e) {
-                return new Failed(classify(e), null);
+            if (step instanceof Body(var bytes, var contentType)) {
+                return new Fetched(bytes, contentType, current, permanentTarget);
             }
-            if (step instanceof Rejected rejected) {
-                return rejected.failure();
+            Hop hop = nextHop(current, (Redirect) step, redirects);
+            if (hop instanceof Stop(var stopped)) {
+                return stopped;
             }
-            if (step instanceof Body body) {
-                return new Fetched(body.bytes(), body.contentType(), current, permanentTarget);
-            }
-            Redirect redirect = (Redirect) step;
-            if (redirect.location() == null) {
-                return new Failed(FetchFailureReason.HTTP_STATUS, redirect.status());
-            }
-            if (redirects >= properties.maxRedirects()) {
-                return new Failed(FetchFailureReason.REDIRECT_LIMIT, redirect.status());
-            }
-            URI next = HttpUrls.resolve(current, redirect.location()).orElse(null);
-            if (next == null) {
-                return new Failed(FetchFailureReason.INVALID_URL, null);
-            }
-            permanentChain &= PERMANENT_REDIRECT_STATUSES.contains(redirect.status());
+            Move move = (Move) hop;
+            permanentChain &= move.permanent();
             if (permanentChain) {
-                permanentTarget = next;
+                permanentTarget = move.next();
             }
-            current = next;
+            current = move.next();
         }
+    }
+
+    private Step attempt(URI current) {
+        if (!HttpUrls.isHttp(current) || HttpUrls.hasUserInfo(current)) {
+            return new Rejected(new Failed(FetchFailureReason.INVALID_URL, null));
+        }
+        try {
+            return request(current);
+        } catch (RestClientException e) {
+            return new Rejected(new Failed(classify(e), null));
+        }
+    }
+
+    private Hop nextHop(URI current, Redirect redirect, int redirects) {
+        if (redirect.location() == null) {
+            return new Stop(new Failed(FetchFailureReason.HTTP_STATUS, redirect.status()));
+        }
+        if (redirects >= properties.maxRedirects()) {
+            return new Stop(new Failed(FetchFailureReason.REDIRECT_LIMIT, redirect.status()));
+        }
+        return HttpUrls.resolve(current, redirect.location())
+                .<Hop>map(next -> new Move(next, PERMANENT_REDIRECT_STATUSES.contains(redirect.status())))
+                .orElseGet(() -> new Stop(new Failed(FetchFailureReason.INVALID_URL, null)));
     }
 
     private Step request(URI url) {

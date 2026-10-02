@@ -98,7 +98,7 @@ class IngestObservabilityIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void theIngestSummaryLogLineCarriesFeedIdAndSourceId(CapturedOutput output) throws Exception {
+    void theIngestSummaryLogLineCarriesFeedIdAndSourceId(CapturedOutput output) {
         FeedResponse feed = create();
 
         ingestService.refresh(feed.id());
