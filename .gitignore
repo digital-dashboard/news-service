@@ -31,3 +31,12 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Local configuration and secrets ###
+application-local.y*ml
+/config/
+.env
+.env.*
+
+### macOS ###
+.DS_Store
