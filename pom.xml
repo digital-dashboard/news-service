@@ -19,6 +19,7 @@
         <!-- Dependency-check CVE overrides; drop once Spring Boot manages these versions or newer -->
         <jackson-bom.version>3.1.7</jackson-bom.version>
         <logback.version>1.6.3</logback.version>
+        <tomcat.version>11.0.26</tomcat.version>
 
         <jacoco.version>0.8.15</jacoco.version>
         <jacoco.line.minimum>0.80</jacoco.line.minimum>
@@ -72,7 +73,17 @@
                     <groupId>io.micrometer</groupId>
                     <artifactId>micrometer-registry-otlp</artifactId>
                 </exclusion>
+                <!-- The OkHttp sender pulls in OkHttp and kotlin-stdlib; the JDK HttpClient sender needs neither. -->
+                <exclusion>
+                    <groupId>io.opentelemetry</groupId>
+                    <artifactId>opentelemetry-exporter-sender-okhttp</artifactId>
+                </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-sender-jdk</artifactId>
+            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
