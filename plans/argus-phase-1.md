@@ -54,7 +54,7 @@
   - The live `docker` job's drop regex must become `.*(hymenaois|argus).*`, or Argus logs are shipped twice.
   - No `$` in the fragment, because the stack runs Promtail with `-config.expand-env=true`.
 - **Grafana provisioning.** Argus gets its own provider and a sibling directory (`/etc/grafana/provisioning/dashboards-argus`, folder "Artemis"). Otherwise the Hymenaios provider scans it recursively.
-- **Prerequisites** gain three items: the PgBouncer `argus` entry in transaction mode, the Swarm secrets `argus_db_username`, `argus_db_password` and `argus_admin_key`, and confirming that the snapshot registry accepts root-level image names.
+- **Prerequisites** gain three items: the PgBouncer `argus` entry in transaction mode, the Swarm secrets `argus_db_password` and `argus_admin_key` (the DB username is a plain `ARGUS_DB_USERNAME` env var), and confirming that the snapshot registry accepts root-level image names.
 - **Error codes.** The list gains generic codes: `BAD_REQUEST`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `NOT_ACCEPTABLE`, `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`.
 - **Phase 1 acceptance** becomes "the dashboard renders without query errors at Gate A". "Live data on the real stack" moves to Gate B.
 

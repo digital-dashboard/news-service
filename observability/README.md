@@ -15,7 +15,8 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 - Swarm service `argus` (a stack prefix such as `argus_argus` is fine) attached to `artemis-dashboard-network` with the alias `news-service`, `postgres-overlay-network` and `grafana-overlay-network`.
 - A PgBouncer `argus` entry in **transaction** pooling mode. Argus keeps no session state.
 - A database `argus` whose user may run `CREATE EXTENSION IF NOT EXISTS unaccent` (or a DBA creates the extension first).
-- Swarm secrets `argus_db_username`, `argus_db_password` and `argus_admin_key`, and the environment variable `ARGUS_DB_URL`.
+- Swarm secrets `argus_db_password` and `argus_admin_key`, and the environment variables `ARGUS_DB_URL` and `ARGUS_DB_USERNAME`.
+- A database role and database for Argus, e.g. as a superuser: `CREATE ROLE argus LOGIN PASSWORD '...'; CREATE DATABASE argus OWNER argus;`. As the database owner, Argus can enable the trusted `unaccent` extension itself.
 - Swarm `stop_grace_period: 40s`: graceful shutdown waits up to 30s and Swarm's default is 10s.
 - Container memory of at least ~384 MB: the `HEALTHCHECK` starts a small JVM every 30s inside the container, so do not size the service below that.
 - Never override the image's `HEALTHCHECK` with `wget` or `curl`: the runtime image has neither, and the image already ships an exec-form Java probe.
