@@ -1,0 +1,31 @@
+# Standalone scrape_configs file for Prometheus scrape_config_files, or copy the job into prometheus.yml.
+# Nothing in this repository deploys it: see observability/README.md.
+scrape_configs:
+  - job_name: argus
+    metrics_path: /actuator/prometheus
+    dockerswarm_sd_configs:
+      - host: tcp://docker-proxy:2375
+        role: tasks
+        port: 8080
+    relabel_configs:
+      - source_labels: [__meta_dockerswarm_service_name]
+        regex: '(?:.+_)?argus'
+        action: keep
+      - source_labels: [__meta_dockerswarm_task_desired_state]
+        regex: running
+        action: keep
+      # Argus is on three networks and task discovery yields one target per network;
+      # only grafana-overlay-network is routable from Prometheus.
+      - source_labels: [__meta_dockerswarm_network_name]
+        regex: grafana-overlay-network
+        action: keep
+      - source_labels: [__address__]
+        regex: '([^:]+)(?::\d+)?'
+        target_label: __address__
+        replacement: '${1}:8080'
+      - target_label: service
+        replacement: argus
+      - source_labels: [__meta_dockerswarm_task_id]
+        target_label: task_id
+      - source_labels: [__meta_dockerswarm_node_hostname]
+        target_label: node

@@ -1,0 +1,3 @@
+*
+!target/argus.jar
+!target/classes/com/j11a/argus/probe/HealthProbe.class

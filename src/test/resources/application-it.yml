@@ -1,0 +1,10 @@
+argus:
+  admin:
+    key: integration-test-admin-key-0123456789abcdef
+
+management:
+  opentelemetry:
+    tracing:
+      export:
+        # The default 5s batch delay would slow the trace export test.
+        schedule-delay: 100ms

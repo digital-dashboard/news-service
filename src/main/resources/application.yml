@@ -1,13 +1,99 @@
 spring:
   application:
-    name: news-service
-  jackson:
-    mapper:
-      accept-case-insensitive-enums: true
-  devtools:
-    add-properties: false
-  profiles:
-    default: prod
-newscatcher:
-  host: api.newscatcherapi.com/v2
-  pathLatestHeadlines: latest_headlines
+    name: argus
+  config:
+    import: optional:configtree:/run/secrets/
+  datasource:
+    url: ${argus.db.url}
+    username: ${argus.db.username}
+    password: ${argus.db.password}
+    hikari:
+      pool-name: argus-pool
+      maximum-pool-size: 10
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+  sql:
+    init:
+      mode: never
+  web:
+    resources:
+      add-mappings: false
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+server:
+  port: 8080
+  shutdown: graceful
+
+# Swarm secrets arrive as files under /run/secrets and are bound by the configtree import above.
+argus:
+  db:
+    url: ${ARGUS_DB_URL:}
+    username: ${ARGUS_DB_USERNAME:${argus_db_username:}}
+    password: ${ARGUS_DB_PASSWORD:${argus_db_password:}}
+  admin:
+    key: ${ARGUS_ADMIN_KEY:${argus_admin_key:}}
+  telemetry:
+    otlp-base-url: ${ARGUS_OTLP_BASE_URL:http://tempo:4318}
+    sampling-probability: ${ARGUS_TRACING_SAMPLING_PROBABILITY:1.0}
+
+logging:
+  structured:
+    format:
+      console: logstash
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,db
+  observations:
+    enable:
+      # Filter-chain spans would otherwise show up as orphan root traces for the actuator requests.
+      spring.security: false
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        http.client.requests: true
+        hikaricp.connections.acquire: true
+        argus: true
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false
+  tracing:
+    sampling:
+      probability: ${argus.telemetry.sampling-probability}
+  opentelemetry:
+    # ARGUS_OTLP_BASE_URL is the only source for the trace endpoint.
+    map-environment-variables: false
+    tracing:
+      export:
+        otlp:
+          # Used verbatim by Boot, so the signal path is appended here.
+          endpoint: ${argus.telemetry.otlp-base-url}/v1/traces

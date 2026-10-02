@@ -1,0 +1,10 @@
+databaseChangeLog:
+  - changeSet:
+      id: 01-enable-unaccent
+      author: argus
+      changes:
+        - sql:
+            sql: CREATE EXTENSION IF NOT EXISTS unaccent SCHEMA public
+      rollback:
+        - sql:
+            sql: DROP EXTENSION IF EXISTS unaccent

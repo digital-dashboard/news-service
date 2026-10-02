@@ -1,0 +1,40 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+# Same pipeline as observability/promtail/argus-job.yml (a test keeps them equal); only discovery differs.
+scrape_configs:
+  - job_name: argus
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        regex: argus
+        action: keep
+      - target_label: service
+        replacement: argus
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: stream
+    pipeline_stages:
+      - docker: {}
+      - json:
+          expressions:
+            level: level
+            logger: logger_name
+            traceId: traceId
+            # Quoted because of the @; unquoted, the field is never found and the timestamp falls back.
+            ts: '"@timestamp"'
+      # traceId is extracted but never promoted: it is unbounded. Grafana's derived field reads it from the line.
+      - labels:
+          level:
+      - timestamp:
+          source: ts
+          format: RFC3339Nano
+          action_on_failure: fudge

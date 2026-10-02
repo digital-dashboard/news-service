@@ -1,0 +1,16 @@
+logging:
+  structured:
+    format:
+      console: ""
+
+argus:
+  db:
+    url: ${ARGUS_DB_URL:jdbc:postgresql://localhost:5432/argus}
+  telemetry:
+    otlp-base-url: ${ARGUS_OTLP_BASE_URL:http://localhost:4318}
+
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: false

@@ -1,0 +1,105 @@
+# Gate A: a throwaway local stack that runs the built Argus image with Prometheus, Loki, Promtail,
+# Tempo and Grafana. Everything is published on 127.0.0.1 only. All credentials below are fake and local.
+name: argus-gate-a
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: argus
+      POSTGRES_USER: argus
+      POSTGRES_PASSWORD: gate-a-fake-db-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U argus -d argus"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.18.1
+    environment:
+      DATA_SOURCE_URI: postgres:5432/argus?sslmode=disable
+      DATA_SOURCE_USER: argus
+      DATA_SOURCE_PASS: gate-a-fake-db-password
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  argus:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: argus:local
+    environment:
+      ARGUS_DB_URL: jdbc:postgresql://postgres:5432/argus
+      ARGUS_DB_USERNAME: argus
+      ARGUS_DB_PASSWORD: gate-a-fake-db-password
+      ARGUS_ADMIN_KEY: gate-a-fake-admin-key-0123456789abcdef
+      ARGUS_OTLP_BASE_URL: http://tempo:4318
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tempo:
+        condition: service_started
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=1d"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  tempo:
+    image: grafana/tempo:2.8.2
+    command: ["-config.file=/etc/tempo.yaml"]
+    user: root
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "127.0.0.1:3200:3200"
+
+  loki:
+    image: grafana/loki:3.5.5
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+
+  promtail:
+    image: grafana/promtail:3.5.5
+    command: ["-config.file=/etc/promtail/promtail.yml"]
+    volumes:
+      - ./promtail.yml:/etc/promtail/promtail.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    environment:
+      # Anonymous admin is acceptable only because every port here is bound to 127.0.0.1.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./grafana/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ../../grafana/dashboards/dashboard.yaml:/etc/grafana/provisioning/dashboards/dashboard.yaml:ro
+      - ../../grafana/dashboards:/etc/grafana/provisioning/dashboards-argus:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+volumes:
+  tempo-data:
+  loki-data:
