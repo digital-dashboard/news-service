@@ -32,8 +32,8 @@ class BuildContractTest {
     void pomIdentifiesArgusAsASnapshot() throws IOException {
         String pom = read(POM).replaceFirst("(?s)<parent>.*?</parent>", "");
 
-        assertThat(pom).contains("<groupId>com.j11a</groupId>", "<artifactId>argus</artifactId>");
-        assertThat(pom).containsPattern("<version>[^<]+-SNAPSHOT</version>");
+        assertThat(pom).contains("<groupId>com.j11a</groupId>", "<artifactId>argus</artifactId>")
+                .containsPattern("<version>[^<]+-SNAPSHOT</version>");
     }
 
     @Test

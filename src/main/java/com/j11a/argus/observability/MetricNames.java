@@ -2,10 +2,15 @@ package com.j11a.argus.observability;
 
 import java.util.Set;
 
-/** Every custom meter name and tag key. */
 public final class MetricNames {
 
     public static final String PREFIX = "argus";
+
+    public static final String FETCH = "argus.fetch";
+    public static final String INGEST = "argus.ingest";
+    public static final String FETCH_SIZE = "argus.fetch.size";
+    public static final String INGEST_ENTRIES = "argus.ingest.entries";
+    public static final String PARSE_MISSING = "argus.parse.missing";
 
     private MetricNames() {
     }
@@ -26,10 +31,14 @@ public final class MetricNames {
         public static final String KIND = "kind";
         public static final String STATE = "state";
 
-        public static final Set<String> ALL = Set.of(
+        private static final Set<String> ALL = Set.of(
                 SOURCE, FEED, FEED_ID, WATCH, TRIGGER, OUTCOME, REASON, DECISION, TYPE, SCHEDULED_JOB, KIND, STATE);
 
         private Tags() {
+        }
+
+        public static Set<String> all() {
+            return ALL;
         }
     }
 }

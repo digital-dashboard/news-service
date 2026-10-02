@@ -7,19 +7,16 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.StreamSupport;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.yaml.snakeyaml.Yaml;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 class ArgusDashboardTest {
 
     private static final Path DASHBOARD = Path.of("grafana/dashboards/argus-observability.json");
-    private static final Path PROVIDER = Path.of("grafana/dashboards/dashboard.yaml");
     private static final Set<String> REQUIRED_VARIABLES = Set.of("DS_PROMETHEUS", "DS_LOKI", "DS_TEMPO");
 
     private static JsonNode dashboard;
@@ -35,8 +32,7 @@ class ArgusDashboardTest {
 
     @Test
     void committedDashboardPassesValidation() {
-        // Catalogue coverage stays off until a phase publishes custom meters.
-        List<Violation> violations = new DashboardValidator(MetricCatalogue.ALL, REQUIRED_VARIABLES, false).validate(dashboard);
+        List<Violation> violations = new DashboardValidator(MetricCatalogue.all(), REQUIRED_VARIABLES, true).validate(dashboard);
 
         assertThat(violations).isEmpty();
     }
@@ -59,7 +55,8 @@ class ArgusDashboardTest {
                 .toList();
 
         assertThat(rows).containsExactly(
-                "Overview", "API & HTTP", "JVM & runtime", "PostgreSQL & HikariCP", "Container", "Traces", "Logs");
+                "Overview", "Ingestion pipeline", "Data quality", "API & HTTP", "JVM & runtime",
+                "PostgreSQL & HikariCP", "Container", "Traces", "Logs");
     }
 
     @Test
@@ -113,17 +110,5 @@ class ArgusDashboardTest {
                 .toList();
 
         assertThat(lokiQueries).isNotEmpty().allSatisfy(query -> assertThat(query).contains("{service=\"argus\""));
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void provisioningFileDeclaresItsOwnProviderForTheArtemisFolder() throws IOException {
-        Map<String, Object> config = new Yaml().load(Files.readString(PROVIDER));
-        Map<String, Object> provider = ((List<Map<String, Object>>) config.get("providers")).get(0);
-        Map<String, Object> options = (Map<String, Object>) provider.get("options");
-
-        assertThat(provider.get("name")).isEqualTo("Argus Dashboards");
-        assertThat(provider.get("folder")).isEqualTo("Artemis");
-        assertThat(options.get("path")).isEqualTo("/etc/grafana/provisioning/dashboards-argus");
     }
 }

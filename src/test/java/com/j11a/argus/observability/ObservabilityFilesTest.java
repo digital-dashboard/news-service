@@ -63,8 +63,7 @@ class ObservabilityFilesTest {
     void prometheusJobScrapesTheActuatorEndpointOfTheArgusService() throws IOException {
         Map<String, Object> job = prometheusJob();
 
-        assertThat(job.get("job_name")).isEqualTo("argus");
-        assertThat(job.get("metrics_path")).isEqualTo("/actuator/prometheus");
+        assertThat(job).containsEntry("job_name", "argus").containsEntry("metrics_path", "/actuator/prometheus");
         assertThat(keepsOn(job, "__meta_dockerswarm_service_name", "(?:.+_)?argus")).isTrue();
     }
 
@@ -73,8 +72,8 @@ class ObservabilityFilesTest {
     void prometheusJobDiscoversTasksThroughTheDockerProxy() throws IOException {
         List<Map<String, Object>> discovery = (List<Map<String, Object>>) prometheusJob().get("dockerswarm_sd_configs");
 
-        assertThat(discovery).hasSize(1);
-        assertThat(discovery.get(0)).containsEntry("host", "tcp://docker-proxy:2375").containsEntry("role", "tasks");
+        assertThat(discovery).singleElement().satisfies(entry ->
+                assertThat(entry).containsEntry("host", "tcp://docker-proxy:2375").containsEntry("role", "tasks"));
     }
 
     @Test
@@ -87,9 +86,8 @@ class ObservabilityFilesTest {
 
     @Test
     void prometheusJobSetsTheServiceLabel() throws IOException {
-        assertThat(relabelRules(prometheusJob())).anySatisfy(rule -> {
-            assertThat(rule).containsEntry("target_label", "service").containsEntry("replacement", "argus");
-        });
+        assertThat(relabelRules(prometheusJob())).anySatisfy(rule ->
+                assertThat(rule).containsEntry("target_label", "service").containsEntry("replacement", "argus"));
     }
 
     @Test
@@ -101,7 +99,7 @@ class ObservabilityFilesTest {
     void promtailJobKeepsOnlyArgusAndDerivesTheServiceLabel() throws IOException {
         Map<String, Object> job = promtailJob();
 
-        assertThat(job.get("job_name")).isEqualTo("argus");
+        assertThat(job).containsEntry("job_name", "argus");
         assertThat(keepsOn(job, "__meta_docker_container_label_com_docker_swarm_service_name", "(?:.+_)?argus")).isTrue();
         assertThat(relabelRules(job)).anySatisfy(rule -> assertThat(rule).containsEntry("target_label", "service"));
     }
@@ -118,7 +116,7 @@ class ObservabilityFilesTest {
     void promtailPromotesOnlyTheLevelLabel() throws IOException {
         Map<String, Object> labels = stage(promtailJob(), "labels");
 
-        assertThat(labels.keySet()).containsExactly("level");
+        assertThat(labels).containsOnlyKeys("level");
     }
 
     @Test

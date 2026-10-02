@@ -126,6 +126,29 @@ class ApplicationYamlTest {
     }
 
     @Test
+    void feedFetchDefaultsAreSetAndRedirectsAreLeftToTheFetcher() {
+        withEnvironment(env -> {
+            assertThat(env.getProperty("spring.http.clients.connect-timeout")).isEqualTo("5s");
+            assertThat(env.getProperty("spring.http.clients.read-timeout")).isEqualTo("15s");
+            assertThat(env.getProperty("spring.http.clients.redirects")).isEqualTo("dont-follow");
+            assertThat(env.getProperty("argus.fetch.user-agent")).isEqualTo("Argus/0.1 (self-hosted RSS aggregator)");
+            assertThat(env.getProperty("argus.fetch.max-body-size")).isEqualTo("5MB");
+            assertThat(env.getProperty("argus.fetch.max-redirects")).isEqualTo("5");
+        });
+    }
+
+    @Test
+    void feedFetchSettingsCanBeOverriddenThroughEnvironmentVariablePlaceholders() {
+        withEnvironment(env -> {
+            assertThat(env.getProperty("spring.http.clients.read-timeout")).isEqualTo("2s");
+            assertThat(env.getProperty("argus.fetch.user-agent")).isEqualTo("Custom/9");
+            assertThat(env.getProperty("argus.fetch.max-body-size")).isEqualTo("1MB");
+            assertThat(env.getProperty("argus.fetch.max-redirects")).isEqualTo("2");
+        }, "ARGUS_FETCH_READ_TIMEOUT=2s", "ARGUS_FETCH_USER_AGENT=Custom/9", "ARGUS_FETCH_MAX_BODY_SIZE=1MB",
+                "ARGUS_FETCH_MAX_REDIRECTS=2");
+    }
+
+    @Test
     void devProfileUsesPlainLogsAndDisablesTraceExport() {
         withEnvironment(env -> {
             assertThat(env.getProperty("logging.structured.format.console")).isEmpty();

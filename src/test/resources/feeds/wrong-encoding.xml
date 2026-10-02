@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Café Dispatch</title>
+    <link>https://cafe.example.test/</link>
+    <description>Notes</description>
+    <item>
+      <title>The café reopens – “at last”</title>
+      <link>https://cafe.example.test/reopens</link>
+      <description>Fresh bread and a curly ’ quote.</description>
+    </item>
+  </channel>
+</rss>

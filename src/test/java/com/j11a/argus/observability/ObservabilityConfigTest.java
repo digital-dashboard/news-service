@@ -3,8 +3,10 @@ package com.j11a.argus.observability;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationFilter;
 import io.micrometer.observation.ObservationPredicate;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.client.observation.ClientRequestObservationContext;
 import org.springframework.http.server.observation.ServerRequestObservationContext;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -34,5 +36,53 @@ class ObservabilityConfigTest {
     @Test
     void keepsObservationsThatAreNotServerRequests() {
         assertThat(predicate.test("argus.fetch", new Observation.Context())).isTrue();
+    }
+
+    @Test
+    void clientUrlsLoseTheirQueryStringAndUserInfo() {
+        ObservationFilter filter = new ObservabilityConfig().clientUrlsLoseTheirQueryString();
+        org.springframework.http.client.observation.ClientRequestObservationContext context =
+                new org.springframework.http.client.observation.ClientRequestObservationContext(
+                        new org.springframework.mock.http.client.MockClientHttpRequest(
+                                org.springframework.http.HttpMethod.GET,
+                                java.net.URI.create("https://user:pw@feeds.example.test:8443/a/b.xml?token=hunter2")));
+
+        filter.map(context);
+
+        assertThat(context.getHighCardinalityKeyValue("http.url").getValue())
+                .isEqualTo("https://feeds.example.test:8443/a/b.xml");
+    }
+
+    @Test
+    void clientObservationsWithoutARequestAreLeftAlone() {
+        ObservationFilter filter = new ObservabilityConfig().clientUrlsLoseTheirQueryString();
+        ClientRequestObservationContext context = new ClientRequestObservationContext(null);
+
+        filter.map(context);
+
+        assertThat(context.getHighCardinalityKeyValue("http.url")).isNull();
+    }
+
+    @Test
+    void otherObservationsPassThroughTheUrlFilterUntouched() {
+        ObservationFilter filter = new ObservabilityConfig().clientUrlsLoseTheirQueryString();
+        Observation.Context context = new Observation.Context();
+
+        assertThat(filter.map(context)).isSameAs(context);
+    }
+
+    @Test
+    void withoutQueryKeepsPercentEscapesInThePath() {
+        String url = ObservabilityConfig.withoutQuery(java.net.URI.create("https://feeds.example.test/a%20b/c.xml?t=1"));
+
+        assertThat(url).isEqualTo("https://feeds.example.test/a%20b/c.xml");
+    }
+
+    @Test
+    void withoutQueryKeepsTheBracketsOfAnIpv6Host() {
+        assertThat(ObservabilityConfig.withoutQuery(java.net.URI.create("http://[::1]:8080/feed?token=x")))
+                .isEqualTo("http://[::1]:8080/feed");
+        assertThat(ObservabilityConfig.withoutQuery(java.net.URI.create("http://[2001:db8::1]/feed")))
+                .isEqualTo("http://[2001:db8::1]/feed");
     }
 }

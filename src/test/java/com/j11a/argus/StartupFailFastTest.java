@@ -6,10 +6,15 @@ import static com.j11a.argus.testsupport.StartupTestSupport.withOverrides;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.j11a.argus.config.ArgusProperties;
+import com.j11a.argus.feed.fetch.FetchProperties;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.WebApplicationType;
+import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.context.ConfigurableApplicationContext;
 
 /** Full boots only: the property-level rules are covered by ArgusPropertiesTest. */
 class StartupFailFastTest {
@@ -27,11 +32,27 @@ class StartupFailFastTest {
             "argus.db.username=argus",
             "argus.db.password=db-password",
             "argus.admin.key=" + KEY_32);
+    private static final Set<String> PROPERTIES_BEANS = Set.of(
+            ArgusProperties.class.getName(), FetchProperties.class.getName());
     private static final String SHORT_KEY = "too-short-admin-key";
+
+    // Without a database the repositories cannot exist, so everything except the properties is created lazily and
+    // only the property binding runs at startup.
+    private static void everythingButPropertiesIsLazy(ConfigurableApplicationContext context) {
+        context.addBeanFactoryPostProcessor(beanFactory -> {
+            for (String name : beanFactory.getBeanDefinitionNames()) {
+                BeanDefinition definition = beanFactory.getBeanDefinition(name);
+                if (!PROPERTIES_BEANS.contains(String.valueOf(definition.getBeanClassName()))) {
+                    definition.setLazyInit(true);
+                }
+            }
+        });
+    }
 
     private static void run(String... overrides) {
         new SpringApplicationBuilder(ArgusApplication.class)
                 .web(WebApplicationType.SERVLET)
+                .initializers(StartupFailFastTest::everythingButPropertiesIsLazy)
                 .run(withOverrides(DEFAULTS, "--", overrides).toArray(String[]::new))
                 .close();
     }

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Unsafe Links</title>
+    <link>https://unsafe.example.test/</link>
+    <description>Entries with links that are not http</description>
+    <item>
+      <title>Script link</title>
+      <link>javascript:alert(1)</link>
+      <guid>unsafe-1</guid>
+      <description>Has a guid, so it is still stored.</description>
+    </item>
+    <item>
+      <title>Data link</title>
+      <link>data:text/html,hello</link>
+      <guid>unsafe-2</guid>
+    </item>
+  </channel>
+</rss>

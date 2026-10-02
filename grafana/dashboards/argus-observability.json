@@ -1,7 +1,7 @@
 {
   "uid": "argus-observability",
   "title": "Argus — Observability",
-  "description": "Argus service health: HTTP RED metrics, JVM, PostgreSQL and HikariCP, container resources, Tempo traces and Loki logs. Version-controlled in grafana/dashboards and validated by the Argus dashboard tests.",
+  "description": "Argus service health: HTTP RED metrics, the ingestion pipeline, data quality, JVM, PostgreSQL and HikariCP, container resources, Tempo traces and Loki logs. Version-controlled in grafana/dashboards and validated by the Argus dashboard tests.",
   "tags": [
     "argus",
     "artemis",
@@ -77,9 +77,19 @@
       {
         "name": "source",
         "label": "Source",
-        "description": "Reserved for per-source series; All only for now.",
-        "type": "custom",
-        "query": "All",
+        "description": "Filters the ingestion panels by feed source.",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "query": {
+          "query": "label_values(argus_fetch_seconds_count, source)",
+          "refId": "source"
+        },
+        "definition": "label_values(argus_fetch_seconds_count, source)",
+        "refresh": 2,
+        "sort": 1,
         "includeAll": true,
         "multi": true,
         "allValue": ".*",
@@ -91,13 +101,7 @@
             "$__all"
           ]
         },
-        "options": [
-          {
-            "text": "All",
-            "value": "$__all",
-            "selected": true
-          }
-        ],
+        "options": [],
         "hide": 0
       },
       {
@@ -444,6 +448,435 @@
       }
     },
     {
+      "id": 29,
+      "type": "row",
+      "title": "Ingestion pipeline",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Fetch outcomes",
+      "description": "Fetches per second by outcome and reason. Failures carry the reason tag (for example timeout, http_status, io); successful fetches have reason none. Empty until the first feed is added or refreshed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (outcome, reason) (rate(argus_fetch_seconds_count{job=\"argus\",source=~\"$source\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{outcome}} {{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Fetch p95 by source",
+      "description": "95th percentile time to fetch a feed, per source. Includes failed fetches. Empty until the first feed is added or refreshed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, source) (rate(argus_fetch_seconds_bucket{job=\"argus\",source=~\"$source\"}[$__rate_interval]))) >= 0",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Ingest p95 by source",
+      "description": "95th percentile of an ingest run per source. A refresh covers fetch, parse and persist; the first ingest after POST /feeds covers persist only.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, source) (rate(argus_ingest_seconds_bucket{job=\"argus\",source=~\"$source\"}[$__rate_interval]))) >= 0",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "Bytes per fetch",
+      "description": "Mean response size per successful fetch, by source, from the fetch size summary. The denominator is clamped so the panel stays defined when nothing is fetched.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (source) (rate(argus_fetch_size_bytes_sum{job=\"argus\",source=~\"$source\"}[$__rate_interval])) / clamp_min(sum by (source) (rate(argus_fetch_size_bytes_count{job=\"argus\",source=~\"$source\"}[$__rate_interval])), 0.000000001)",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "Entry decisions",
+      "description": "Parsed entries per second by persist decision: inserted, unchanged or skipped. Stacked so the total is the entry throughput.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (decision) (rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{decision}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 30,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 35,
+      "type": "row",
+      "title": "Data quality",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "panels": []
+    },
+    {
+      "id": 36,
+      "type": "timeseries",
+      "title": "Missing fields rate",
+      "description": "Entries per second that arrived without a field, by kind of field. A rise points at a feed that stopped providing it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (kind) (rate(argus_parse_missing_total{job=\"argus\",source=~\"$source\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 37,
+      "type": "timeseries",
+      "title": "Missing fields share",
+      "description": "Share of entries missing a field, by kind. The denominator is every entry seen by the decision counter (argus_ingest_entries_total) and is clamped, so the panel stays defined at zero traffic.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (kind) (rate(argus_parse_missing_total{job=\"argus\",source=~\"$source\"}[$__rate_interval])) / scalar(clamp_min(sum(rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\"}[$__rate_interval])), 0.000000001))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 6,
       "type": "row",
       "title": "API & HTTP",
@@ -452,7 +885,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 5
+        "y": 31
       },
       "panels": []
     },
@@ -469,7 +902,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 6
+        "y": 32
       },
       "targets": [
         {
@@ -526,7 +959,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 6
+        "y": 32
       },
       "targets": [
         {
@@ -607,7 +1040,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 40
       },
       "targets": [
         {
@@ -664,7 +1097,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 22
+        "y": 48
       },
       "panels": []
     },
@@ -681,7 +1114,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 23
+        "y": 49
       },
       "targets": [
         {
@@ -750,7 +1183,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 23
+        "y": 49
       },
       "targets": [
         {
@@ -807,7 +1240,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 31
+        "y": 57
       },
       "targets": [
         {
@@ -863,7 +1296,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 31
+        "y": 57
       },
       "targets": [
         {
@@ -929,7 +1362,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 65
       },
       "panels": []
     },
@@ -946,7 +1379,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 40
+        "y": 66
       },
       "targets": [
         {
@@ -1038,7 +1471,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 40
+        "y": 66
       },
       "targets": [
         {
@@ -1095,7 +1528,7 @@
         "h": 4,
         "w": 12,
         "x": 0,
-        "y": 48
+        "y": 74
       },
       "targets": [
         {
@@ -1161,7 +1594,7 @@
         "h": 4,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 78
       },
       "targets": [
         {
@@ -1223,7 +1656,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 48
+        "y": 74
       },
       "targets": [
         {
@@ -1287,7 +1720,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 82
       },
       "panels": []
     },
@@ -1304,7 +1737,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 57
+        "y": 83
       },
       "targets": [
         {
@@ -1360,7 +1793,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 57
+        "y": 83
       },
       "targets": [
         {
@@ -1413,7 +1846,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 91
       },
       "panels": []
     },
@@ -1430,7 +1863,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 92
       },
       "targets": [
         {
@@ -1460,7 +1893,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 76
+        "y": 102
       },
       "panels": []
     },
@@ -1477,7 +1910,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 77
+        "y": 103
       },
       "targets": [
         {
@@ -1536,7 +1969,7 @@
         "h": 14,
         "w": 24,
         "x": 0,
-        "y": 85
+        "y": 111
       },
       "targets": [
         {

@@ -87,7 +87,7 @@ Durable decisions that apply across all phases:
     - Plain text in the tracked `dev` profile. `local` is reserved for the git-ignored personal override.
     - `traceId` is never a Loki label.
   - **Dashboard**:
-    - One versioned JSON (title "Argus — Observability", uid `argus-observability`, folder "Artemis", tags `argus`, `artemis`, `observability`), with a Grafana provisioning file.
+    - One versioned JSON (title "Argus — Observability", uid `argus-observability`, folder "Argus", tags `argus`, `artemis`, `observability`), imported into the Grafana folder "Argus" (the repo JSON is the source).
     - Datasources come from the template variables `DS_PROMETHEUS`, `DS_LOKI` and `DS_TEMPO`, never hardcoded UIDs.
     - A JUnit validator, modelled on Hymenaios' rules, checks:
       - Valid JSON
@@ -124,7 +124,7 @@ These are not built by this plan, but the plan depends on them. Each is listed w
   - The Prometheus `argus` job and the Promtail `argus` job, applied from this repo's observability config. The live Promtail `docker` job's drop regex becomes `.*(hymenaois|argus).*`, so logs aren't shipped twice. The dashboard gets its own Grafana provider and directory.
   - A PgBouncer `argus` database entry (transaction pooling), and confirmation that the snapshot registry accepts root-level image names.
   - The Loki datasource configured with a `traceId` derived field linking to Tempo, and Tempo with `tracesToLogsV2` to Loki. Both are already in place for Hymenaios; verify them.
-- **Phase 13:** the dashboard provisioned into Grafana, or imported. During development it is pushed through the Grafana MCP to check that it renders.
+- **Phase 13:** the dashboard imported into the Grafana folder "Argus". During development it is pushed through the Grafana MCP to check that it renders.
 
 ## Definition of done (applies to every phase)
 
@@ -200,15 +200,17 @@ The thinnest complete path from an RSS URL to articles over HTTP:
 - The minimum `source` and `feed` tables are introduced, with sources resolved by registrable domain, so the schema already has its final shape.
 - The catch-all exception handler must let `AccessDeniedException` and `AuthenticationException` through (or map them to 403 and 401) when the admin-key filter and any method security arrive.
 
+Phase 2 also added exact-URL 409 `FEED_URL_CONFLICT` and a minimal `GET /feeds/{id}`; see `plans/argus-phase-2.md`.
+
 Telemetry:
 - Meters:
-  - The per-feed fetch timer (`source`, `outcome`, `reason`)
-  - The per-feed ingest timer
+  - The per-source fetch timer (`source`, `outcome`, `reason`)
+  - The per-source ingest timer
   - The downloaded-bytes distribution
-  - The entry decision counter (`inserted`/`unchanged` for now)
+  - The entry decision counter (`inserted`/`unchanged`/`skipped`)
   - The parse data-quality counter (entries missing a date, GUID, image or author)
 - A feed-ingest span with fetch, parse and persist children, the outbound `RestClient` span, and `feedId`/`sourceId` in MDC and as span attributes.
-- Dashboard: a new **Ingestion pipeline** row (fetch outcomes rate, fetch p95 by source, bytes per fetch, entry decisions) and a **Data quality** row (missing fields by kind, as rate and share).
+- Dashboard: a new **Ingestion pipeline** row (fetch outcomes rate, fetch p95 by source, ingest p95 by source, bytes per fetch, entry decisions) and a **Data quality** row (missing fields by kind, as rate and share).
 
 ### Acceptance criteria
 
@@ -313,6 +315,7 @@ Telemetry:
 - [ ] An edited upstream article is updated in place, with no new article.
 - [ ] With the seed context on, a fresh database starts with the seeded sources and feeds. A seeded feed deleted through the API stays deleted after a restart.
 - [ ] Meter-registry tests assert each decision, link-fallback outcome and lock-wait meter with its tags.
+- [ ] A re-key migration recomputes `guid_key`/`link_key` with the full link cleaner and collapses collisions, so the first poll after Phase 4 creates no duplicates of Phase 2 articles.
 
 ---
 
@@ -322,9 +325,9 @@ Telemetry:
 
 ### What to build
 
-Prevent duplicate subscriptions, and make source corrections clean:
+Prevent duplicate subscriptions, and make source corrections clean. Exact-URL conflicts (409 `FEED_URL_CONFLICT`) already exist from Phase 2; this phase adds the scheme, `www.`, redirect and self-link checks.
 - Creating or updating a feed checks the URL as entered, the final URL after redirects, and the feed's self link against every existing feed's identity URLs. A conflict returns 409 `FEED_URL_CONFLICT` with `existingFeedId`.
-- During polling, a 301 or 308 updates the stored URL. If that would collide with another feed, the feed is disabled and its last error says "duplicate of feed {id}".
+- During polling, a 301 or 308 updates the stored URL. The fetcher reports `permanentTarget`, the end of the leading 301/308 chain, for this. If that would collide with another feed, the feed is disabled and its last error says "duplicate of feed {id}".
 - `POST /sources/{id}/merge` and changing a feed's `sourceId` both:
   - Move feeds and articles in one transaction holding both source locks.
   - Collapse duplicates to the oldest article, folding in feed links and watch matches.
@@ -344,6 +347,7 @@ Telemetry:
 ### Acceptance criteria
 
 - [ ] URLs that differ only by scheme, `www.` or trailing slash, a URL that redirects to an existing feed, and a matching self link all give 409 naming the existing feed.
+- [ ] A feed's source key must agree with its host or self link; a feed declaring another outlet's site link is not attached to that outlet's source.
 - [ ] A permanent redirect updates the stored URL. A temporary redirect doesn't.
 - [ ] A permanent redirect onto another subscribed feed disables the feed with the "duplicate of" error.
 - [ ] Merging two sources with overlapping articles leaves one copy per duplicate group, with no duplicate link or match rows, and removes the empty source.
@@ -587,7 +591,7 @@ Finish the cross-cutting work that the earlier phases have been building up:
   Polling, ingestion, feed health and dedup panels respond to the `source` and `feed` variables. The Traces table filters by the selected feed's span attribute, and Logs filter by `feedId`.
 - Tempo span-metrics panels (from the metrics generator) for per-span-name latency, as a cross-check on the Micrometer timers.
 - springdoc OpenAPI JSON and Swagger UI under `/news/v2`, documenting every endpoint, its problem responses, and the `X-Admin-Key` security scheme.
-- The observability README is completed: what each row answers, the prerequisites, how to apply the Prometheus and Promtail jobs, how to provision or import the dashboard, and how to run the validator.
+- The observability README is completed: what each row answers, the prerequisites, how to apply the Prometheus and Promtail jobs, how to import the dashboard, and how to run the validator.
 
 ### Acceptance criteria
 

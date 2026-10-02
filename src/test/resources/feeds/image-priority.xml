@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Pictures</title>
+    <link>https://pics.example.test/</link>
+    <description>Image selection</description>
+    <item>
+      <title>All sources present</title>
+      <link>https://pics.example.test/1</link>
+      <guid>1</guid>
+      <description><![CDATA[<img src="https://pics.example.test/html1.jpg"/> text]]></description>
+      <enclosure url="https://pics.example.test/enc1.jpg" type="image/jpeg" length="100"/>
+      <media:content url="https://pics.example.test/content1.jpg" medium="image"/>
+      <media:thumbnail url="https://pics.example.test/thumb1.jpg"/>
+    </item>
+    <item>
+      <title>Media content by medium</title>
+      <link>https://pics.example.test/2</link>
+      <guid>2</guid>
+      <description><![CDATA[<img src="https://pics.example.test/html2.jpg"/> text]]></description>
+      <enclosure url="https://pics.example.test/enc2.jpg" type="image/jpeg" length="100"/>
+      <media:content url="https://pics.example.test/content2.jpg" medium="image"/>
+    </item>
+    <item>
+      <title>Media content by type, video ignored</title>
+      <link>https://pics.example.test/3</link>
+      <guid>3</guid>
+      <description>No html image</description>
+      <media:content url="https://pics.example.test/clip3.mp4" type="video/mp4" medium="video"/>
+      <media:content url="https://pics.example.test/content3.png" type="image/png"/>
+    </item>
+    <item>
+      <title>Enclosure image</title>
+      <link>https://pics.example.test/4</link>
+      <guid>4</guid>
+      <description><![CDATA[<img src="https://pics.example.test/html4.jpg"/> text]]></description>
+      <enclosure url="https://pics.example.test/enc4.jpg" type="image/jpeg" length="100"/>
+    </item>
+    <item>
+      <title>Audio enclosure, falls to HTML</title>
+      <link>https://pics.example.test/5</link>
+      <guid>5</guid>
+      <description><![CDATA[<p>Hello</p><img src="/relative5.jpg" alt="x"/>]]></description>
+      <enclosure url="https://pics.example.test/ep5.mp3" type="audio/mpeg" length="100"/>
+    </item>
+    <item>
+      <title>Data URI is skipped</title>
+      <link>https://pics.example.test/6</link>
+      <guid>6</guid>
+      <description><![CDATA[<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw="/><img src="https://pics.example.test/second6.jpg"/>]]></description>
+    </item>
+    <item>
+      <title>Image only in content:encoded</title>
+      <link>https://pics.example.test/7</link>
+      <guid>7</guid>
+      <description></description>
+      <content:encoded><![CDATA[<p>Body</p><img src="https://pics.example.test/body7.jpg"/>]]></content:encoded>
+    </item>
+    <item>
+      <title>No image anywhere</title>
+      <link>https://pics.example.test/8</link>
+      <guid>8</guid>
+      <description>Plain text</description>
+    </item>
+    <item>
+      <title>Non-http thumbnail skipped</title>
+      <link>https://pics.example.test/9</link>
+      <guid>9</guid>
+      <description>Plain text</description>
+      <media:thumbnail url="ftp://pics.example.test/thumb9.jpg"/>
+      <enclosure url="https://pics.example.test/enc9.jpg" type="image/jpeg" length="100"/>
+    </item>
+  </channel>
+</rss>

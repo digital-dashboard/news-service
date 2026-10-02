@@ -1,0 +1,42 @@
+databaseChangeLog:
+  - changeSet:
+      id: 05-create-article-feed
+      author: argus
+      changes:
+        - createTable:
+            tableName: article_feed
+            columns:
+              - column:
+                  name: article_id
+                  type: bigint
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_article_feed_article
+                    references: article(id)
+                    deleteCascade: true
+              - column:
+                  name: feed_id
+                  type: bigint
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_article_feed_feed
+                    references: feed(id)
+                    deleteCascade: true
+              - column:
+                  name: first_seen_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+        - addPrimaryKey:
+            tableName: article_feed
+            columnNames: article_id, feed_id
+            constraintName: pk_article_feed
+        - createIndex:
+            indexName: ix_article_feed_feed
+            tableName: article_feed
+            columns:
+              - column:
+                  name: feed_id
+      rollback:
+        - dropTable:
+            tableName: article_feed

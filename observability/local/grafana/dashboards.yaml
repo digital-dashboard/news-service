@@ -1,12 +1,11 @@
 apiVersion: 1
 
 providers:
-  - name: 'Argus Dashboards'
+  - name: 'Argus (local)'
     orgId: 1
-    folder: 'Artemis'
+    folder: 'Argus'
     type: file
     disableDeletion: false
     editable: true
     options:
-      # A sibling of provisioning/dashboards: the Hymenaios provider scans that tree recursively.
       path: /etc/grafana/provisioning/dashboards-argus

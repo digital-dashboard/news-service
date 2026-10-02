@@ -12,6 +12,11 @@ Argus is the news-aggregation service of the Artemis dashboard. It is a Spring B
 | `ARGUS_ADMIN_KEY` | `argus_admin_key` | yes | Admin API key, at least 32 characters |
 | `ARGUS_OTLP_BASE_URL` | | no | OTLP base URL without a path, default `http://tempo:4318`; Argus appends `/v1/traces` |
 | `ARGUS_TRACING_SAMPLING_PROBABILITY` | | no | Trace sampling, 0.0 to 1.0, default `1.0` |
+| `ARGUS_FETCH_CONNECT_TIMEOUT` | | no | Feed fetch connect timeout, default `5s` |
+| `ARGUS_FETCH_READ_TIMEOUT` | | no | Total deadline per fetch request, including reading the body; applies to each redirect hop, default `15s` |
+| `ARGUS_FETCH_USER_AGENT` | | no | User-Agent sent when fetching feeds, default `Argus/0.1 (self-hosted RSS aggregator)` |
+| `ARGUS_FETCH_MAX_BODY_SIZE` | | no | Largest feed body accepted, default `5MB` |
+| `ARGUS_FETCH_MAX_REDIRECTS` | | no | Redirects followed per fetch, default `5` |
 
 Secret files are read from `/run/secrets/`. Argus refuses to start when a required value is missing or invalid, and never prints the admin key or the password.
 
@@ -32,6 +37,23 @@ Maven uses ~/.m2/settings.xml; pass -s <settings.xml> to override.
 
 ```bash
 docker build -t argus:local .
+```
+
+## API
+
+Everything is under `/news/v2`. Writes need the `X-Admin-Key` header; reads don't.
+
+Feed URLs can carry tokens, and reads are open. Without a valid admin key, every response that contains a feed URL shows it without user-info and query string (`scheme://host[:port]/path`). With a valid `X-Admin-Key`, even on a `GET`, the full URL is returned. `siteUrl` is a public site link and is always shown as stored.
+
+- `POST /feeds`: add a feed. Body `url`, `topic` and optional `name`. Returns 201, or 400 (validation, including a URL with user-info such as `http://user:pass@host/feed`), 401 (missing or wrong key), 409 `FEED_URL_CONFLICT` (that exact URL exists) or 422 `FEED_INVALID` (the URL could not be fetched or is not a feed; `reason` says why).
+- `GET /feeds/{id}`: one feed, or 404 `FEED_NOT_FOUND`.
+- `POST /feeds/{id}/refresh`: fetch and ingest now, and return the ingest report. It answers 200 even when the upstream failed; the report then has `outcome=FAILED`. An unknown id is 404 `FEED_NOT_FOUND`.
+- `GET /articles?page&size`: articles, newest first. `page` is zero-based and defaults to 0; `size` is 1 to 100 and defaults to 20. A page whose offset (`page * size`) exceeds the 32-bit range is 400 `VALIDATION_FAILED`.
+
+```bash
+curl -X POST http://localhost:8080/news/v2/feeds \
+  -H "X-Admin-Key: $ARGUS_ADMIN_KEY" -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.org/feed.xml","topic":"TECH"}'
 ```
 
 ## Observability

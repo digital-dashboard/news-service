@@ -6,9 +6,9 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 |---|---|---|
 | `prometheus/argus-scrape.yml` | Prometheus | Add as a `scrape_config_files` entry, or copy the job into `prometheus.yml` |
 | `promtail/argus-job.yml` | Promtail | Merge into the `scrape_configs` list of `promtail-config.yml` (Promtail has no include mechanism) |
-| `../grafana/dashboards/argus-observability.json` | Grafana | Provisioned from a directory, or imported through the UI |
-| `../grafana/dashboards/dashboard.yaml` | Grafana | Dashboard provider for the Argus directory |
+| `../grafana/dashboards/argus-observability.json` | Grafana | Imported into the "Argus" folder; the repo JSON is the single source |
 | `local/` | Your laptop | Throwaway Gate A stack, see below |
+| `local/grafana/dashboards.yaml` | Gate A Grafana only | Local-only dashboard provider; never used on the real stack |
 
 ## Prerequisites outside this repo
 
@@ -31,9 +31,9 @@ Nothing here is deployed by this repository. These are versioned blueprints that
    - In the existing `docker` job, change the drop rule's regex from `'.*hymenaois.*'` to `'.*(hymenaois|argus).*'`. Without this edit Argus logs are shipped twice.
    - Promtail runs with `-config.expand-env=true`, so keep dollar signs out of the fragment. Because the Promtail configuration is a Swarm config, bump its name (for example `promtail-config-v2`) and redeploy, or the old content stays mounted.
 3. **Grafana.**
-   - Create a directory `/etc/grafana/provisioning/dashboards-argus` containing `argus-observability.json`.
-   - Put `dashboard.yaml` (provider `Argus Dashboards`, folder `Artemis`) next to the existing provider in `/etc/grafana/provisioning/dashboards/`.
-   - The directory must not be inside `provisioning/dashboards`: the Hymenaios provider scans that tree recursively and would provision the dashboard twice.
+   - Import `../grafana/dashboards/argus-observability.json` into the Grafana folder "Argus" through the UI ("Import dashboard", then choose the Prometheus, Loki and Tempo datasources), overwriting the existing dashboard with the same uid.
+   - Alternatively the Grafana MCP `update_dashboard` can push the same JSON, with the owner's OK.
+   - The repo JSON is the single source. Never mount it as a Swarm config or a dashboard provider.
 
 ## Design decisions
 
@@ -44,7 +44,15 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 - **OTLP base URL appended by the app.** Spring Boot uses `management.opentelemetry.tracing.export.otlp.endpoint` verbatim. Argus takes `ARGUS_OTLP_BASE_URL` (no path) and appends `/v1/traces` itself, and ignores `OTEL_EXPORTER_OTLP_ENDPOINT`.
 - **`scheduled_job` tag.** A metric tag named `job` would collide with Prometheus's own `job` label and be renamed `exported_job`.
 - **Actuator requests get no span and no `http.server.requests` metric**, so Prometheus scrapes and health probes do not flood Tempo or skew latency.
-- **The local stack mounts the whole `grafana/dashboards` directory.** This is harmless: Grafana ignores the yaml.
+- **The local stack provisions the dashboard from `../../grafana/dashboards`** through `local/grafana/dashboards.yaml` (provider "Argus (local)", folder "Argus"). That provider exists only in the Gate A kit.
+
+## What the rows answer
+
+- **Overview:** is the service up, how long has it run, and are requests failing or slow.
+- **Ingestion pipeline:** are feed fetches succeeding and how fast (outcomes by reason, fetch and ingest p95 per source), how large the downloads are, and what happened to each entry (inserted, unchanged, skipped). The `source` variable filters these panels.
+- **Data quality:** how often parsed entries lack a field (date, GUID, image, author), as a rate and as a share of all entries seen, so a feed that stops providing a field stands out.
+- **API & HTTP, JVM & runtime, PostgreSQL & HikariCP, Container:** request rate, latency and status; heap, GC, threads and CPU; pool and database health; container CPU and memory.
+- **Traces, Logs:** slow and errored traces from Tempo, and the live Loki log stream.
 
 ## Validating the dashboard
 
@@ -53,7 +61,7 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 ./mvnw -B test -Dtest='*Dashboard*Test'
 ```
 
-The validator (test sources, `com.j11a.argus.observability.dashboard`) checks that the dashboard has a title and uid, rows and a timeseries panel, the `DS_PROMETHEUS`, `DS_LOKI` and `DS_TEMPO` variables, unique panel ids and a `gridPos` on every panel, no literal datasource uid anywhere (panel, target or variable), and non-empty targets. Every PromQL metric on a Prometheus target or variable must be a catalogued Argus series or an explicitly allowed framework or exporter series, with exact suffixes. A catalogue-coverage rule (every catalogued meter appears on the dashboard) exists but is switched off until a phase publishes custom meters.
+The validator (test sources, `com.j11a.argus.observability.dashboard`) checks that the dashboard has a title and uid, rows and a timeseries panel, the `DS_PROMETHEUS`, `DS_LOKI` and `DS_TEMPO` variables, unique panel ids and a `gridPos` on every panel, no literal datasource uid anywhere (panel, target or variable), and non-empty targets. Every PromQL metric on a Prometheus target or variable must be a catalogued Argus series or an explicitly allowed framework or exporter series, with exact suffixes. Catalogue coverage is on: every catalogued meter must appear on the dashboard, so a new meter fails the build until it has a panel.
 
 ## Gate A: local verification
 
@@ -72,7 +80,7 @@ Then check:
 - Prometheus (http://127.0.0.1:9090): the `argus` target is up, with HTTP, JVM and Hikari series carrying `application="argus"`.
 - Tempo (http://127.0.0.1:3200, or Grafana Explore): traces for `service.name=argus`, and no `/actuator` spans.
 - Loki (Grafana Explore): `{service="argus"}` returns JSON lines, `level` is a label, and each line's `traceId` links to Tempo.
-- Grafana (http://127.0.0.1:3000, folder Artemis): every panel renders without a query error. Container CPU and memory are expected to be empty because there is no cAdvisor locally.
+- Grafana (http://127.0.0.1:3000, folder Argus): every panel renders without a query error. Container CPU and memory are expected to be empty because there is no cAdvisor locally.
 - `docker ps` reports the Argus container as `healthy`.
 
 Tear it down with `docker compose -p argus-gate-a down -v`.
@@ -90,3 +98,10 @@ Run after the owner deploys and applies the edits above.
 - [ ] The Container CPU and memory panels are populated (cAdvisor labels the service as `container_label_com_docker_swarm_service_name`).
 - [ ] The PostgreSQL panels are populated, including `pg_database_size_bytes{datname="argus"}`.
 - [ ] `docker service ps` and `docker ps` report the Argus task as `healthy`, using the image's own health check.
+
+Phase 2 additions, after the dashboard is imported:
+
+- [ ] After deploy, POST a feed with the admin key and refresh it (see the API section of the main README).
+- [ ] The Ingestion pipeline and Data quality rows show data.
+- [ ] After a refresh, Tempo shows an `argus.ingest` trace with fetch, parse and persist children and an outbound client span. (After POST /feeds, fetch and parse sit beside `argus.ingest`, not under it.)
+- [ ] Loki ingest log lines carry `feedId` and `sourceId`.

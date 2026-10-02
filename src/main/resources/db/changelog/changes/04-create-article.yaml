@@ -1,0 +1,94 @@
+databaseChangeLog:
+  - changeSet:
+      id: 04-create-article
+      author: argus
+      changes:
+        - createTable:
+            tableName: article
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_article
+              - column:
+                  name: source_id
+                  type: bigint
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_article_source
+                    references: source(id)
+              - column:
+                  name: guid_key
+                  type: text
+                  constraints:
+                    nullable: false
+              - column:
+                  name: raw_guid
+                  type: text
+              - column:
+                  name: link_key
+                  type: text
+              - column:
+                  name: link
+                  type: text
+              - column:
+                  name: title
+                  type: text
+                  constraints:
+                    nullable: false
+              - column:
+                  name: excerpt
+                  type: text
+              - column:
+                  name: author
+                  type: text
+              - column:
+                  name: image_url
+                  type: text
+              - column:
+                  name: categories
+                  type: text[]
+                  defaultValue: "{}"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: published_at
+                  type: timestamp with time zone
+              - column:
+                  name: updated_at_upstream
+                  type: timestamp with time zone
+              - column:
+                  name: effective_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fetched_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: modified_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+        - addUniqueConstraint:
+            tableName: article
+            columnNames: source_id, guid_key
+            constraintName: uq_article_source_guid_key
+        - createIndex:
+            indexName: ix_article_source_link_key
+            tableName: article
+            columns:
+              - column:
+                  name: source_id
+              - column:
+                  name: link_key
+        - sql:
+            sql: CREATE INDEX ix_article_effective_at ON article (effective_at DESC, id DESC)
+      rollback:
+        - dropTable:
+            tableName: article

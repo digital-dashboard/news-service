@@ -1,6 +1,11 @@
 package com.j11a.argus.web.error;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
+import tools.jackson.core.JacksonException.Reference;
+import tools.jackson.databind.exc.MismatchedInputException;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.TypeMismatchException;
@@ -8,6 +13,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -19,6 +27,9 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+// S2638 false positive: Spring 7 declares these handler returns @Nullable as a type-use annotation, which Sonar
+// does not read, so it treats the overrides' matching @Nullable returns as loosening a non-null contract.
+@SuppressWarnings("java:S2638")
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
@@ -28,7 +39,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     ResponseEntity<ProblemDetail> handleApiException(ApiException ex) {
-        return Problems.response(ex.code(), ex.getMessage());
+        ProblemDetail problem = Problems.of(ex.code(), ex.getMessage());
+        ex.properties().forEach(problem::setProperty);
+        return ResponseEntity.status(ex.code().status()).body(problem);
+    }
+
+    /** Spring Security's ExceptionTranslationFilter owns these; the catch-all below would turn them into a 500. */
+    @ExceptionHandler({AuthenticationException.class, AccessDeniedException.class})
+    void rethrowSecurityException(RuntimeException ex) {
+        throw ex;
     }
 
     @ExceptionHandler(Exception.class)
@@ -38,8 +57,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @Override
-    protected ResponseEntity<Object> handleExceptionInternal(
-            Exception ex, Object body, HttpHeaders headers, HttpStatusCode statusCode, WebRequest request) {
+    protected @Nullable ResponseEntity<Object> handleExceptionInternal(
+            Exception ex, @Nullable Object body, HttpHeaders headers, HttpStatusCode statusCode, WebRequest request) {
         Object problemBody = body == null && ex instanceof ErrorResponse errorResponse ? errorResponse.getBody() : body;
         if (problemBody instanceof ProblemDetail problem && !Problems.hasCode(problem)) {
             Problems.applyContract(problem, ErrorCode.forStatus(statusCode));
@@ -48,7 +67,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @Override
-    protected ResponseEntity<Object> handleMethodArgumentNotValid(
+    protected @Nullable ResponseEntity<Object> handleMethodArgumentNotValid(
             MethodArgumentNotValidException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         List<FieldProblem> errors = ex.getBindingResult().getAllErrors().stream()
                 .map(error -> new FieldProblem(
@@ -59,7 +78,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @Override
-    protected ResponseEntity<Object> handleHandlerMethodValidationException(
+    protected @Nullable ResponseEntity<Object> handleHandlerMethodValidationException(
             HandlerMethodValidationException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         List<FieldProblem> errors = ex.getParameterValidationResults().stream()
                 .flatMap(result -> result.getResolvableErrors().stream()
@@ -71,7 +90,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @Override
-    protected ResponseEntity<Object> handleTypeMismatch(
+    protected @Nullable ResponseEntity<Object> handleTypeMismatch(
             TypeMismatchException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         String field = ex instanceof MethodArgumentTypeMismatchException mismatch
                 ? mismatch.getName() : String.valueOf(ex.getPropertyName());
@@ -79,14 +98,29 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @Override
-    protected ResponseEntity<Object> handleMissingServletRequestParameter(
+    protected @Nullable ResponseEntity<Object> handleMissingServletRequestParameter(
             MissingServletRequestParameterException ex, HttpHeaders headers, HttpStatusCode status,
             WebRequest request) {
         FieldProblem error = new FieldProblem(ex.getParameterName(), "parameter is required");
         return validationFailed(ex, headers, status, request, List.of(error));
     }
 
-    private ResponseEntity<Object> validationFailed(
+    @Override
+    protected @Nullable ResponseEntity<Object> handleHttpMessageNotReadable(
+            HttpMessageNotReadableException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        if (ex.getCause() instanceof MismatchedInputException mismatch && !mismatch.getPath().isEmpty()) {
+            String field = mismatch.getPath().stream()
+                    .map(Reference::getPropertyName)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.joining("."));
+            if (!field.isEmpty()) {
+                return validationFailed(ex, headers, status, request, List.of(new FieldProblem(field, INVALID_VALUE)));
+            }
+        }
+        return super.handleHttpMessageNotReadable(ex, headers, status, request);
+    }
+
+    private @Nullable ResponseEntity<Object> validationFailed(
             Exception ex, HttpHeaders headers, HttpStatusCode status, WebRequest request, List<FieldProblem> errors) {
         ProblemDetail problem = Problems.of(ErrorCode.VALIDATION_FAILED, ErrorCode.VALIDATION_FAILED.title());
         problem.setProperty(Problems.ERRORS_PROPERTY, errors);
