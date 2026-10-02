@@ -2,6 +2,7 @@ package com.j11a.argus.observability;
 
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public record MeterSpec(String name, MeterKind kind, String baseUnit, Set<String> tags) {
 
@@ -19,7 +20,7 @@ public record MeterSpec(String name, MeterKind kind, String baseUnit, Set<String
         return switch (kind) {
             case TIMER, DISTRIBUTION_SUMMARY -> DISTRIBUTION_SUFFIXES.stream()
                     .map(suffix -> base + suffix)
-                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                    .collect(Collectors.toUnmodifiableSet());
             case COUNTER -> Set.of(base + "_total");
             case GAUGE -> Set.of(base);
         };

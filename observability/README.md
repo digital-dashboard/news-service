@@ -16,6 +16,8 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 - A PgBouncer `argus` entry in **transaction** pooling mode. Argus keeps no session state.
 - A database `argus` whose user may run `CREATE EXTENSION IF NOT EXISTS unaccent` (or a DBA creates the extension first).
 - Swarm secrets `argus_db_username`, `argus_db_password` and `argus_admin_key`, and the environment variable `ARGUS_DB_URL`.
+- Swarm `stop_grace_period: 40s`: graceful shutdown waits up to 30s and Swarm's default is 10s.
+- Container memory of at least ~384 MB: the `HEALTHCHECK` starts a small JVM every 30s inside the container, so do not size the service below that.
 - Never override the image's `HEALTHCHECK` with `wget` or `curl`: the runtime image has neither, and the image already ships an exec-form Java probe.
 - The snapshot registry must accept root-level image names (`argus:<tag>`, no `common/` path), because the Jenkinsfile passes an empty `dockerRepoPath`.
 - The Grafana datasources keep the uids `prometheus`, `loki` and `tempo`, the Loki derived field `"(?:traceId|trace_id)"\s*:\s*"([a-f0-9]{16,32})"`, and Tempo's `tracesToLogsV2` mapping `service.name` to the Loki label `service`.
@@ -40,7 +42,8 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 - **Explicit `@timestamp`.** The Promtail job extracts `"@timestamp"` and uses it, so a delayed batch does not distort the log volume.
 - **OTLP base URL appended by the app.** Spring Boot uses `management.opentelemetry.tracing.export.otlp.endpoint` verbatim. Argus takes `ARGUS_OTLP_BASE_URL` (no path) and appends `/v1/traces` itself, and ignores `OTEL_EXPORTER_OTLP_ENDPOINT`.
 - **`scheduled_job` tag.** A metric tag named `job` would collide with Prometheus's own `job` label and be renamed `exported_job`.
-- **Actuator spans are dropped**, so Prometheus scrapes and health probes do not flood Tempo.
+- **Actuator requests get no span and no `http.server.requests` metric**, so Prometheus scrapes and health probes do not flood Tempo or skew latency.
+- **The local stack mounts the whole `grafana/dashboards` directory.** This is harmless: Grafana ignores the yaml.
 
 ## Validating the dashboard
 
@@ -77,6 +80,7 @@ Tear it down with `docker compose -p argus-gate-a down -v`.
 
 Run after the owner deploys and applies the edits above.
 
+- [ ] The Swarm service sets `stop_grace_period: 40s` and a memory limit of at least ~384 MB.
 - [ ] The `argus` target is up in Prometheus, and there is exactly one target per task (no duplicate per-network targets).
 - [ ] Tempo has traces for `service.name=argus`, and none of them is an `/actuator` span.
 - [ ] Loki `{service="argus"}` returns parsed JSON lines with a `level` label, and each line appears once (the `docker` job no longer ships it).

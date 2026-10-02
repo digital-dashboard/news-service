@@ -371,7 +371,7 @@ The code is organised by feature (feeds, articles, stories, watches, ingestion, 
     - **Traces.** OpenTelemetry through Spring Boot 4's OpenTelemetry support and the Micrometer Observation API, exported over OTLP/HTTP to Tempo. Boot's endpoint property is used verbatim, so Argus takes its own validated base URL and appends `/v1/traces` itself, with environment-variable mapping disabled.
       - Spans: a root span per poll, a child span per feed ingest (fetch, parse, resolve, persist), HTTP server spans, `RestClient` client spans, watch backfill, retention, source merge.
       - Feed and source ids are span attributes, never metric tags. Sampling is configurable, defaulting to 100%.
-    - **Logs.** Spring Boot structured logging to the console in the Logstash JSON format: `@timestamp`, `level`, `logger_name`, `message`, plus `traceId`/`spanId` and MDC keys for poll id, feed id and source id. Promtail parses these fields the same way as for Hymenaios, and `traceId` stays in the log text, never a Loki label.
+    - **Logs.** Spring Boot structured logging to the console in the Logstash JSON format: `@timestamp`, `level`, `logger_name`, `message`, plus `traceId`/`spanId` and MDC keys for poll id, feed id and source id. Promtail parses these fields with the job in `observability/promtail/argus-job.yml`, and `traceId` stays in the log text, never a Loki label.
     - **Dashboard.** One versioned dashboard JSON with a Grafana provisioning file, built on datasource template variables (no hardcoded UIDs), plus a JUnit validator over the metric catalogue, modelled on Hymenaios' rules. It fails on:
       - Invalid JSON
       - Missing template variables
@@ -511,7 +511,7 @@ Spring Cloud Config is **not** adopted. Configuration stays local, overridden by
   - **Version:** the pom version must end in `-SNAPSHOT` (e.g. `0.1.0-SNAPSHOT`). The snapshot pipeline aborts otherwise. Release builds belong to the shared `standardSpringReleasePipeline` and are out of scope here.
   - **Build & Test:** runs `clean verify` inside the shared Maven container (Maven 3.9 on Temurin 21). Wire Surefire (unit) and Failsafe (Testcontainers ITs) so that one `verify` runs both and produces the JaCoCo XML report for Sonar.
   - **Testcontainers in CI:** the shared Maven step already points Testcontainers at the Docker socket proxy, disables Ryuk and overrides the container host. The pipeline's post step prunes leftover Testcontainers containers. So:
-    - The integration tests must not rely on Ryuk, on bind-mounting the Docker socket, or on container reuse in CI. Reuse is a local-only convenience.
+    - The integration tests must not rely on Ryuk, on bind-mounting the Docker socket, or on container reuse. Testcontainers reuse is not used.
     - They must reach containers through the mapped host and port Testcontainers reports, never through hardcoded `localhost`.
   - **Sonar:**
     - The shared step runs the scan and passes the branch name. The pom still supplies the organisation, project key and coverage settings.
@@ -591,7 +591,7 @@ Spring Cloud Config is **not** adopted. Configuration stays local, overridden by
    - **OPML codec**: nested outlines, OPML 1.0 vs 2.0, missing attributes, a round trip (export then import gives the same feeds), malformed input.
    - **Feed discoverer**: multiple alternate links, relative hrefs, Atom and RSS types, no links, input that is already a feed.
 2. **Feed fetcher (stubbed HTTP server)**: 200 with validators captured, 304, 404 (not retried), 503 (retried, then failed), timeout, body larger than the limit, redirect followed (final URL reported, and 301/308 flagged as permanent while 302/307 are not), redirect limit exceeded, non-http scheme rejected, User-Agent and conditional headers sent.
-3. **Integration (Testcontainers PostgreSQL via `@ServiceConnection`, Liquibase applied, seed context off)**:
+3. **Integration (Testcontainers PostgreSQL via a `@Bean` container and a `DynamicPropertyRegistrar`, Liquibase applied, seed context off)**:
    - **Migrations**: Liquibase applies cleanly to an empty database.
    - **Ingestion pipeline**:
      - The first ingest inserts.
@@ -639,7 +639,7 @@ Spring Cloud Config is **not** adopted. Configuration stays local, overridden by
 
 - The current service's tests use a JSON fixture under test resources and Mockito-mocked collaborators. Keep the fixture-file approach (now with XML, OPML and HTML fixtures) and drop the mocks of the HTTP client in favour of a stub server.
 - weather-service already uses Boot 4's Web MVC test starter for controller slice tests, and is the reference for Boot 4 test wiring.
-- Testcontainers with `@ServiceConnection` is new to this codebase. Use a shared integration-test base, or a reusable container configuration, so that the context and container start once per test run. Turn on Testcontainers reuse only locally. In CI the shared library's Maven step runs Testcontainers through the Docker socket proxy with Ryuk disabled (see Build, CI and container).
+- Testcontainers is new to this codebase. Provide the container as a `@Bean` with a `DynamicPropertyRegistrar` that sets `argus.db.*`, because `@ServiceConnection` would fill `spring.datasource.*` and leave the validated `argus.db.*` blank. Use a shared integration-test base, or a reusable container configuration, so that the context and container start once per test run. Testcontainers reuse is not used. In CI the shared library's Maven step runs Testcontainers through the Docker socket proxy with Ryuk disabled (see Build, CI and container).
 
 ## Out of Scope
 

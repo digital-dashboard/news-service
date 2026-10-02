@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 class AllowedSeriesTest {
 
     @Test
-    void externalTimersAllowExactlyTheTimerSuffixes() {
+    void externalTimersAllowOnlyTheirDistributionSeries() {
         Set<String> allowed = AllowedSeries.of(List.of());
 
         assertThat(allowed).contains(
@@ -21,11 +21,13 @@ class AllowedSeriesTest {
     }
 
     @Test
-    void externalGaugesAllowOnlyTheirOwnName() {
+    void externalGaugesAndCountersAllowOnlyTheirOwnName() {
         Set<String> allowed = AllowedSeries.of(List.of());
 
-        assertThat(allowed).contains("jvm_memory_used_bytes", "hikaricp_connections_active", "pg_up", "up");
-        assertThat(allowed).doesNotContain("jvm_memory_used_bytes_count", "hikaricp_connections", "uploads_total");
+        assertThat(allowed).contains("jvm_memory_used_bytes", "hikaricp_connections_active", "pg_up", "up",
+                "pg_stat_database_xact_commit", "container_cpu_usage_seconds_total");
+        assertThat(allowed).doesNotContain("jvm_memory_used_bytes_count", "hikaricp_connections", "uploads_total",
+                "pg_stat_database_xact_commit_total");
     }
 
     @Test

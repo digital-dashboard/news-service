@@ -4,6 +4,7 @@ import com.j11a.argus.observability.MeterSpec;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -122,14 +123,28 @@ final class DashboardValidator {
     }
 
     private static void addIfLiteral(List<Violation> violations, JsonNode datasource, String where) {
-        if (datasource.isMissingNode() || datasource.isNull()) {
+        if (isAbsent(datasource)) {
             return;
         }
-        String uid = datasource.isObject() ? text(datasource, "uid") : datasource.asString("");
+        String uid = datasourceUid(datasource);
         if (!DATASOURCE_VARIABLE.matcher(uid).matches()) {
             violations.add(new Violation("literalDatasource", where,
                     "datasource must be a ${DS_*} variable, found '" + uid + "'"));
         }
+    }
+
+    /** Grafana writes a datasource as an object, a bare uid string, or null; a target without one inherits the panel's. */
+    private static String datasourceUid(JsonNode datasource) {
+        return datasource.isObject() ? text(datasource, "uid") : datasource.asString("");
+    }
+
+    private static boolean isAbsent(JsonNode datasource) {
+        return datasource.isMissingNode() || datasource.isNull();
+    }
+
+    private static String targetDatasourceUid(JsonNode target, JsonNode panel) {
+        JsonNode own = target.path("datasource");
+        return datasourceUid(isAbsent(own) ? panel.path("datasource") : own);
     }
 
     private List<Violation> nonEmptyTargets(List<JsonNode> panels) {
@@ -154,19 +169,28 @@ final class DashboardValidator {
         List<Violation> violations = new ArrayList<>();
         for (JsonNode panel : panels) {
             for (JsonNode target : panel.path("targets")) {
-                JsonNode datasource = target.has("datasource") ? target.path("datasource") : panel.path("datasource");
-                if (PROMETHEUS_DATASOURCE.equals(text(datasource, "uid"))) {
+                if (PROMETHEUS_DATASOURCE.equals(targetDatasourceUid(target, panel))) {
                     checkMetrics(PromqlMetricExtractor.metricsIn(text(target, "expr")), describe(panel), violations, referenced);
                 }
             }
         }
         for (JsonNode variable : dashboard.path("templating").path("list")) {
-            if (PROMETHEUS_DATASOURCE.equals(text(variable.path("datasource"), "uid"))) {
-                String expression = variableExpression(queryOf(variable));
-                checkMetrics(PromqlMetricExtractor.metricsIn(expression), "variable " + text(variable, "name"), violations, referenced);
+            if (PROMETHEUS_DATASOURCE.equals(datasourceUid(variable.path("datasource")))) {
+                checkVariable(variable, violations, referenced);
             }
         }
         return violations;
+    }
+
+    private void checkVariable(JsonNode variable, List<Violation> violations, Set<String> referenced) {
+        String where = "variable " + text(variable, "name");
+        Optional<String> expression = variableExpression(queryOf(variable));
+        if (expression.isEmpty()) {
+            violations.add(new Violation("variableQuery", where,
+                    "query is neither label_values(expr, label) nor query_result(expr): '" + queryOf(variable) + "'"));
+            return;
+        }
+        checkMetrics(PromqlMetricExtractor.metricsIn(expression.get()), where, violations, referenced);
     }
 
     private void checkMetrics(Set<String> metrics, String where, List<Violation> violations, Set<String> referenced) {
@@ -186,13 +210,13 @@ final class DashboardValidator {
     }
 
     /** Variable queries are label_values(expr, label) or query_result(expr); the label name is not a metric. */
-    private static String variableExpression(String query) {
+    private static Optional<String> variableExpression(String query) {
         Matcher labelValues = LABEL_VALUES.matcher(query);
         if (labelValues.matches()) {
-            return labelValues.group(1);
+            return Optional.of(labelValues.group(1));
         }
         Matcher queryResult = QUERY_RESULT.matcher(query);
-        return queryResult.matches() ? queryResult.group(1) : "";
+        return queryResult.matches() ? Optional.of(queryResult.group(1)) : Optional.empty();
     }
 
     private static String queryOf(JsonNode node) {

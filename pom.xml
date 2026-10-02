@@ -16,7 +16,7 @@
     <properties>
         <java.version>21</java.version>
 
-        <!-- Dependency-check CVE overrides, same as hymenaois-backend; drop once Spring Boot manages these versions or newer -->
+        <!-- Dependency-check CVE overrides; drop once Spring Boot manages these versions or newer -->
         <jackson-bom.version>3.1.7</jackson-bom.version>
         <logback.version>1.6.3</logback.version>
 

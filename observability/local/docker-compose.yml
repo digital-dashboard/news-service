@@ -1,10 +1,5 @@
 # Gate A: a throwaway local stack that runs the built Argus image with Prometheus, Loki, Promtail,
 # Tempo and Grafana. Everything is published on 127.0.0.1 only. All credentials below are fake and local.
-#
-#   (cd ../.. && ./mvnw -B clean verify)       # produces target/argus.jar, which the image build copies
-#   docker compose -p argus-gate-a up -d --build
-#   ./traffic.sh
-#   docker compose -p argus-gate-a down -v
 name: argus-gate-a
 
 services:

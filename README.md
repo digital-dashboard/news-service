@@ -1,6 +1,6 @@
 # Argus
 
-Argus is the news-aggregation service of the Artemis dashboard. It is a Spring Boot 4 / Java 21 API under `/news/v2` backed by PostgreSQL. It already exposes health, Prometheus metrics, JSON logs and OpenTelemetry traces; feeds and polling arrive in later phases (see `docs/prd-argus.md`).
+Argus is the news-aggregation service of the Artemis dashboard. It is a Spring Boot 4 / Java 21 API under `/news/v2` backed by PostgreSQL. It exposes health, Prometheus metrics, JSON logs and OpenTelemetry traces; product scope is in docs/prd-argus.md.
 
 ## Configuration
 
@@ -15,18 +15,18 @@ Argus is the news-aggregation service of the Artemis dashboard. It is a Spring B
 
 Secret files are read from `/run/secrets/`. Argus refuses to start when a required value is missing or invalid, and never prints the admin key or the password.
 
-For local runs use `SPRING_PROFILES_ACTIVE=dev` (plain-text logs, trace export off). Personal overrides go in the git-ignored `config/application-local.yml`.
+For local runs use `SPRING_PROFILES_ACTIVE=dev` (plain-text logs, trace export off). Personal overrides go in the git-ignored `config/application-local.yml`, which loads only with the local profile: use `SPRING_PROFILES_ACTIVE=dev,local`.
 
 ## Build and verify
 
-The build needs JDK 21 (the default `java` on the owner's machine is newer):
+The build needs JDK 21:
 
 ```bash
 export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 ./mvnw -B clean verify
 ```
 
-`./mvnw` uses the owner's Maven settings (`~/.m2/settings.xml`), which point at the internal Nexus mirror. Pass `-s <settings.xml>` with a settings file of your own to use Maven Central instead.
+Maven uses ~/.m2/settings.xml; pass -s <settings.xml> to override.
 
 `verify` runs the unit tests, the Docker-backed integration tests (Testcontainers needs a running Docker), the dashboard validator and the JaCoCo line-coverage gate (80%). The container image is built from the result:
 

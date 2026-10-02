@@ -73,4 +73,24 @@ class PromqlMetricExtractorTest {
     void keepsColonRecordingRuleNames() {
         assertThat(PromqlMetricExtractor.metricsIn("job:http_requests:rate5m")).containsExactly("job:http_requests:rate5m");
     }
+
+    @Test
+    void keywordsAreCaseInsensitive() {
+        assertThat(PromqlMetricExtractor.metricsIn("a_total AND b_total OR c_total UNLESS d_total"))
+                .containsExactlyInAnyOrder("a_total", "b_total", "c_total", "d_total");
+        assertThat(PromqlMetricExtractor.metricsIn("sum(a_total) BY (job)")).containsExactly("a_total");
+        assertThat(PromqlMetricExtractor.metricsIn("a_total / Inf + NaN")).containsExactly("a_total");
+    }
+
+    @Test
+    void atan2IsAnOperatorNotAMetric() {
+        assertThat(PromqlMetricExtractor.metricsIn("a_total atan2 b_total")).containsExactlyInAnyOrder("a_total", "b_total");
+        assertThat(PromqlMetricExtractor.metricsIn("a_total ATAN2 on (job) b_total"))
+                .containsExactlyInAnyOrder("a_total", "b_total");
+    }
+
+    @Test
+    void infAndNanAreNotMetrics() {
+        assertThat(PromqlMetricExtractor.metricsIn("a_total > inf or a_total < -nan")).containsExactly("a_total");
+    }
 }

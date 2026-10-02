@@ -10,7 +10,7 @@ public class ObservabilityConfig {
 
     static final String ACTUATOR_PREFIX = "/actuator";
 
-    /** Scrapes and health probes would otherwise flood the trace store. */
+    /** Actuator requests get no span and no http.server.requests metric, so they don't flood Tempo or skew latency. */
     @Bean
     ObservationPredicate actuatorRequestsAreNotObserved() {
         return (name, context) -> !(context instanceof ServerRequestObservationContext server

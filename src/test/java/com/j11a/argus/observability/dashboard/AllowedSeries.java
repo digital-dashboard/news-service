@@ -1,56 +1,39 @@
 package com.j11a.argus.observability.dashboard;
 
-import com.j11a.argus.observability.MeterKind;
 import com.j11a.argus.observability.MeterSpec;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Stream;
 
 /**
  * Series a dashboard query may reference: the catalogue plus what the framework and exporters publish.
- * External series reuse {@link MeterSpec} so their suffix sets are exact; the dotted names are only a
- * spelling of the Prometheus names.
+ * External series are the literal Prometheus names, as scraped.
  */
 final class AllowedSeries {
 
-    private static final String BYTES = "bytes";
-    private static final String SECONDS = "seconds";
-
-    private static final List<MeterSpec> EXTERNAL = List.of(
-            external("http.server.requests", MeterKind.TIMER, null),
-            external("http.client.requests", MeterKind.TIMER, null),
-            external("jvm.gc.pause", MeterKind.TIMER, null),
-            external("hikaricp.connections.acquire", MeterKind.TIMER, null),
-            external("jvm.memory.used", MeterKind.GAUGE, BYTES),
-            external("jvm.memory.max", MeterKind.GAUGE, BYTES),
-            external("jvm.threads.live", MeterKind.GAUGE, "threads"),
-            external("process.uptime", MeterKind.GAUGE, SECONDS),
-            external("process.cpu.usage", MeterKind.GAUGE, null),
-            external("system.cpu.usage", MeterKind.GAUGE, null),
-            external("hikaricp.connections.active", MeterKind.GAUGE, null),
-            external("hikaricp.connections.idle", MeterKind.GAUGE, null),
-            external("hikaricp.connections.pending", MeterKind.GAUGE, null),
-            external("hikaricp.connections.max", MeterKind.GAUGE, null),
-            external("hikaricp.connections.min", MeterKind.GAUGE, null),
-            external("container.cpu.usage.seconds", MeterKind.COUNTER, null),
-            external("container.memory.working.set", MeterKind.GAUGE, BYTES),
-            external("pg.up", MeterKind.GAUGE, null),
-            external("pg.stat.database.numbackends", MeterKind.GAUGE, null),
-            external("pg.stat.database.xact.commit", MeterKind.GAUGE, null),
-            external("pg.database.size", MeterKind.GAUGE, BYTES),
-            external("up", MeterKind.GAUGE, null));
+    private static final Set<String> EXTERNAL = Set.of(
+            "http_server_requests_seconds_bucket", "http_server_requests_seconds_count",
+            "http_server_requests_seconds_sum", "http_server_requests_seconds_max",
+            "http_client_requests_seconds_bucket", "http_client_requests_seconds_count",
+            "http_client_requests_seconds_sum", "http_client_requests_seconds_max",
+            "jvm_gc_pause_seconds_bucket", "jvm_gc_pause_seconds_count",
+            "jvm_gc_pause_seconds_sum", "jvm_gc_pause_seconds_max",
+            "hikaricp_connections_acquire_seconds_bucket", "hikaricp_connections_acquire_seconds_count",
+            "hikaricp_connections_acquire_seconds_sum", "hikaricp_connections_acquire_seconds_max",
+            "jvm_memory_used_bytes", "jvm_memory_max_bytes", "jvm_threads_live_threads",
+            "process_uptime_seconds", "process_cpu_usage", "system_cpu_usage",
+            "hikaricp_connections_active", "hikaricp_connections_idle", "hikaricp_connections_pending",
+            "hikaricp_connections_max", "hikaricp_connections_min",
+            "container_cpu_usage_seconds_total", "container_memory_working_set_bytes",
+            "pg_up", "pg_stat_database_numbackends", "pg_stat_database_xact_commit", "pg_database_size_bytes",
+            "up");
 
     private AllowedSeries() {
     }
 
     static Set<String> of(List<MeterSpec> catalogue) {
-        Set<String> allowed = new HashSet<>();
-        Stream.concat(EXTERNAL.stream(), catalogue.stream()).forEach(spec -> allowed.addAll(spec.prometheusSeries()));
+        Set<String> allowed = new HashSet<>(EXTERNAL);
+        catalogue.forEach(spec -> allowed.addAll(spec.prometheusSeries()));
         return Set.copyOf(allowed);
-    }
-
-    private static MeterSpec external(String name, MeterKind kind, String baseUnit) {
-        return new MeterSpec(name, kind, baseUnit, Set.of());
     }
 }

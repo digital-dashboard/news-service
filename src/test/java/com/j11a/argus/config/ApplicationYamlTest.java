@@ -2,11 +2,11 @@ package com.j11a.argus.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.env.Environment;
-import java.util.function.Consumer;
 
 class ApplicationYamlTest {
 
@@ -81,6 +81,12 @@ class ApplicationYamlTest {
             assertThat(env.getProperty(prefix + "hikaricp.connections.acquire")).isEqualTo("true");
             assertThat(env.getProperty(prefix + "argus")).isEqualTo("true");
         });
+    }
+
+    @Test
+    void springSecurityObservationsAreDisabledSoActuatorRequestsLeaveNoOrphanSpans() {
+        withEnvironment(env -> assertThat(env.getProperty("management.observations.enable.spring.security"))
+                .isEqualTo("false"));
     }
 
     @Test

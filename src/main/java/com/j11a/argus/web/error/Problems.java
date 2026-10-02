@@ -3,6 +3,7 @@ package com.j11a.argus.web.error;
 import java.net.URI;
 import java.util.Map;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 
 final class Problems {
 
@@ -16,6 +17,10 @@ final class Problems {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(code.status(), detail);
         applyContract(problem, code);
         return problem;
+    }
+
+    static ResponseEntity<ProblemDetail> response(ErrorCode code, String detail) {
+        return ResponseEntity.status(code.status()).body(of(code, detail));
     }
 
     static void applyContract(ProblemDetail problem, ErrorCode code) {

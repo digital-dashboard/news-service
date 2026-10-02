@@ -1,6 +1,8 @@
 package com.j11a.argus.observability;
 
-/** Every custom meter name and tag key. Each later phase adds its constants here and its spec to {@link MetricCatalogue}. */
+import java.util.Set;
+
+/** Every custom meter name and tag key. */
 public final class MetricNames {
 
     public static final String PREFIX = "argus";
@@ -23,6 +25,9 @@ public final class MetricNames {
         public static final String SCHEDULED_JOB = "scheduled_job";
         public static final String KIND = "kind";
         public static final String STATE = "state";
+
+        public static final Set<String> ALL = Set.of(
+                SOURCE, FEED, FEED_ID, WATCH, TRIGGER, OUTCOME, REASON, DECISION, TYPE, SCHEDULED_JOB, KIND, STATE);
 
         private Tags() {
         }

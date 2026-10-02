@@ -77,7 +77,7 @@
       {
         "name": "source",
         "label": "Source",
-        "description": "Placeholder until Phase 2 publishes per-source series; All only.",
+        "description": "Reserved for per-source series; All only for now.",
         "type": "custom",
         "query": "All",
         "includeAll": true,
@@ -103,7 +103,7 @@
       {
         "name": "feed",
         "label": "Feed",
-        "description": "Placeholder until Phase 2 publishes per-feed series; All only.",
+        "description": "Reserved for per-feed series; All only for now.",
         "type": "custom",
         "query": "All",
         "includeAll": true,
@@ -134,7 +134,7 @@
         "query": "ERROR,WARN,INFO,DEBUG",
         "includeAll": true,
         "multi": true,
-        "allValue": "ERROR|WARN|INFO|DEBUG",
+        "allValue": ".*",
         "current": {
           "text": [
             "All"
@@ -312,7 +312,7 @@
       "id": 4,
       "type": "stat",
       "title": "5xx ratio",
-      "description": "Server-side failures as a share of all requests. The error count falls back to 0 when no 5xx series exists yet, and clamp_min keeps the ratio defined at zero traffic.",
+      "description": "Server-side failures as a share of all requests. The error count falls back to 0 when no 5xx series exists yet, and clamp_min avoids dividing by zero when the request rate is 0. The panel is empty until the first request is served.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -383,7 +383,7 @@
       "id": 5,
       "type": "stat",
       "title": "p95 latency (excl. stream)",
-      "description": "95th percentile request latency, leaving out the long-lived /news/v2/stream connections and the actuator endpoints that would skew it. Shows no traffic when nothing was requested in the window.",
+      "description": "95th percentile request latency, leaving out the long-lived /news/v2/stream connections. Shows no traffic when nothing was requested in the window.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -401,7 +401,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"argus\",uri!~\"/news/v2/stream|/actuator/.*\"}[$__rate_interval]))) >= 0",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"argus\",uri!~\"/news/v2/stream\"}[$__rate_interval]))) >= 0",
           "editorMode": "code",
           "range": false,
           "instant": true,
@@ -517,7 +517,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Latency quantiles",
-      "description": "p50, p95 and p99 request latency, excluding /news/v2/stream and the actuator. Gaps mean no traffic in the window.",
+      "description": "p50, p95 and p99 request latency, excluding /news/v2/stream. Gaps mean no traffic in the window.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -535,7 +535,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"argus\",uri!~\"/news/v2/stream|/actuator/.*\"}[$__rate_interval]))) >= 0",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"argus\",uri!~\"/news/v2/stream\"}[$__rate_interval]))) >= 0",
           "editorMode": "code",
           "range": true,
           "instant": false,
@@ -547,7 +547,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"argus\",uri!~\"/news/v2/stream|/actuator/.*\"}[$__rate_interval]))) >= 0",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"argus\",uri!~\"/news/v2/stream\"}[$__rate_interval]))) >= 0",
           "editorMode": "code",
           "range": true,
           "instant": false,
@@ -559,7 +559,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"argus\",uri!~\"/news/v2/stream|/actuator/.*\"}[$__rate_interval]))) >= 0",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"argus\",uri!~\"/news/v2/stream\"}[$__rate_interval]))) >= 0",
           "editorMode": "code",
           "range": true,
           "instant": false,
@@ -1295,7 +1295,7 @@
       "id": 22,
       "type": "timeseries",
       "title": "Container CPU",
-      "description": "Gate B only: cAdvisor on the real Swarm stack publishes this; the local Gate A stack has no cAdvisor, so the panel is empty there. CPU cores used by the argus service.",
+      "description": "Populated only where cAdvisor runs (the real Swarm stack); empty on the local verification stack. CPU cores used by the argus service.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1351,7 +1351,7 @@
       "id": 23,
       "type": "timeseries",
       "title": "Container memory",
-      "description": "Gate B only: cAdvisor on the real Swarm stack publishes this; the local Gate A stack has no cAdvisor, so the panel is empty there. Working-set memory of the argus service.",
+      "description": "Populated only where cAdvisor runs (the real Swarm stack); empty on the local verification stack. Working-set memory of the argus service.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1468,7 +1468,7 @@
       "id": 27,
       "type": "timeseries",
       "title": "Log volume by level",
-      "description": "Log lines per level over time. Only level is a Loki label; use the level and search variables to narrow the stream below.",
+      "description": "Log lines per level over time. Of the JSON log fields, only level is promoted to a Loki label; use the level and search variables to narrow the stream below.",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOKI}"
@@ -1527,7 +1527,7 @@
       "id": 28,
       "type": "logs",
       "title": "Live log stream",
-      "description": "Argus log lines filtered by the level and search variables. Each line's traceId becomes a link to Tempo through the Loki datasource's derived field.",
+      "description": "Argus log lines filtered by the level and search variables. Of the JSON log fields, only level is promoted to a Loki label. Each line's traceId becomes a link to Tempo through the Loki datasource's derived field.",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOKI}"
@@ -1546,7 +1546,7 @@
             "uid": "${DS_LOKI}"
           },
           "editorMode": "code",
-          "expr": "{service=\"argus\", level=~\"$level\"} |= \"$search\"",
+          "expr": "{service=\"argus\", level=~\"$level\"} |= ${search:doublequote}",
           "queryType": "range"
         }
       ],

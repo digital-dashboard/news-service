@@ -65,6 +65,10 @@ management:
           include: livenessState
         readiness:
           include: readinessState,db
+  observations:
+    enable:
+      # Filter-chain spans would otherwise show up as orphan root traces for the actuator requests.
+      spring.security: false
   metrics:
     tags:
       application: ${spring.application.name}

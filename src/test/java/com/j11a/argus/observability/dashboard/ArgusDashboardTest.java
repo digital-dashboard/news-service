@@ -52,7 +52,7 @@ class ArgusDashboardTest {
     }
 
     @Test
-    void rowsAreInPhase1Order() {
+    void rowsAreInContractOrder() {
         List<String> rows = StreamSupport.stream(dashboard.path("panels").spliterator(), false)
                 .filter(panel -> "row".equals(panel.path("type").asString()))
                 .map(panel -> panel.path("title").asString())
@@ -89,7 +89,19 @@ class ArgusDashboardTest {
                 .toList();
 
         assertThat(container).hasSize(2).allSatisfy(panel ->
-                assertThat(panel.path("description").asString()).contains("Gate B only"));
+                assertThat(panel.path("description").asString()).contains("cAdvisor"));
+    }
+
+    @Test
+    void liveLogSearchIsEscapedByGrafanaBeforeItReachesLoki() {
+        List<String> lokiQueries = StreamSupport.stream(dashboard.path("panels").spliterator(), false)
+                .filter(panel -> "logs".equals(panel.path("type").asString()))
+                .flatMap(panel -> StreamSupport.stream(panel.path("targets").spliterator(), false))
+                .map(target -> target.path("expr").asString())
+                .toList();
+
+        assertThat(lokiQueries).isNotEmpty().allSatisfy(query ->
+                assertThat(query).contains("|= ${search:doublequote}").doesNotContain("\"$search\""));
     }
 
     @Test

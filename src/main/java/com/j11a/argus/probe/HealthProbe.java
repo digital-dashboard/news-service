@@ -27,12 +27,25 @@ public final class HealthProbe {
         HttpRequest request = HttpRequest.newBuilder(target).timeout(timeout).GET().build();
         try {
             int status = client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
-            return status == HTTP_OK ? 0 : 1;
+            if (status == HTTP_OK) {
+                return 0;
+            }
+            return fail("unexpected status " + status);
         } catch (IOException e) {
-            return 1;
+            return fail(e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return 1;
+            return fail(e);
         }
+    }
+
+    private static int fail(Exception e) {
+        String type = e.getClass().getSimpleName();
+        return fail(e.getMessage() == null ? type : type + ": " + e.getMessage());
+    }
+
+    private static int fail(String reason) {
+        System.err.println("health probe failed: " + reason);
+        return 1;
     }
 }

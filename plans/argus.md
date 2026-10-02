@@ -106,7 +106,7 @@ Durable decisions that apply across all phases:
 - **Testing**:
   - Pure modules get JUnit tests with no Spring.
   - The fetcher is tested against a stub HTTP server.
-  - Persistence and ingestion are tested against Testcontainers Postgres via `@ServiceConnection`, CI-safe: no Ryuk, no socket mount, no reuse in CI, and the host and port Testcontainers reports.
+  - Persistence and ingestion are tested against Testcontainers Postgres through a `@Bean` container and a `DynamicPropertyRegistrar` that sets `argus.db.*` (`@ServiceConnection` would fill `spring.datasource.*` and leave the validated `argus.db.*` blank), CI-safe: no Ryuk, no socket mount, no reuse, and the host and port Testcontainers reports.
   - Controllers get Web MVC slice tests.
   - Each phase adds metric assertions against the meter registry.
   - JaCoCo ≥ 80%. Everything, including the dashboard validator, runs in one `mvn verify`.
@@ -164,7 +164,7 @@ Telemetry foundation:
   - **Overview** (first stats): target up, uptime, 5xx ratio, p95 latency excluding `/news/v2/stream`
   - **API & HTTP**: request rate by route, latency quantiles, status mix
   - **JVM & runtime**: heap used vs max, GC pause, live threads, CPU
-  - **PostgreSQL & HikariCP**: connections active/idle/pending, acquisition p95, `pg_up`, the news database's size and commits from postgres-exporter
+  - **PostgreSQL & HikariCP**: connections active/idle/pending, acquisition p95, `pg_up`, the argus database's size and commits from postgres-exporter
   - **Container**: cAdvisor CPU and memory for the `argus` task
   - **Traces**: a TraceQL table of slow or errored traces for `service.name="argus"`
   - **Logs**: volume by level, and a live stream filtered by `level` and `search`
@@ -198,6 +198,7 @@ The thinnest complete path from an RSS URL to articles over HTTP:
 - Parsing produces a plain-text excerpt (about 500 characters, cut at a word boundary), author, link, publish time and image URL across RSS and Atom.
 - Deduplication at this stage is a simple unique key on the GUID (or link), so a second refresh adds nothing. Phase 4 replaces it with the full per-source model.
 - The minimum `source` and `feed` tables are introduced, with sources resolved by registrable domain, so the schema already has its final shape.
+- The catch-all exception handler must let `AccessDeniedException` and `AuthenticationException` through (or map them to 403 and 401) when the admin-key filter and any method security arrive.
 
 Telemetry:
 - Meters:
@@ -477,6 +478,7 @@ Telemetry:
 - `watch-match` events for every new match, including matches from edited articles.
 - Events are published from after-commit listeners, so rolled-back work never emits.
 - Heartbeat comments at a configurable interval, a maximum number of connections, dead-connection cleanup, and best-effort `Last-Event-ID` reconnects.
+- Client disconnects on the stream (`AsyncRequestNotUsableException`, broken pipe) are handled quietly, not through the 500 catch-all.
 
 Telemetry:
 - Meters:

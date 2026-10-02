@@ -7,9 +7,9 @@ import org.springframework.beans.TypeMismatchException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
-import org.springframework.web.ErrorResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -28,15 +28,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     ResponseEntity<ProblemDetail> handleApiException(ApiException ex) {
-        ProblemDetail problem = Problems.of(ex.code(), ex.getMessage());
-        return ResponseEntity.status(ex.code().status()).body(problem);
+        return Problems.response(ex.code(), ex.getMessage());
     }
 
     @ExceptionHandler(Exception.class)
     ResponseEntity<ProblemDetail> handleUnexpected(Exception ex) {
         LOG.error("Unhandled exception", ex);
-        ProblemDetail problem = Problems.of(ErrorCode.INTERNAL_ERROR, UNEXPECTED_DETAIL);
-        return ResponseEntity.status(ErrorCode.INTERNAL_ERROR.status()).body(problem);
+        return Problems.response(ErrorCode.INTERNAL_ERROR, UNEXPECTED_DETAIL);
     }
 
     @Override

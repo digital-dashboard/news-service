@@ -2,34 +2,15 @@ package com.j11a.argus.observability;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class MetricCatalogueTest {
 
-    private static List<String> tagKeys() throws IllegalAccessException {
-        List<String> keys = new ArrayList<>();
-        for (Field field : MetricNames.Tags.class.getDeclaredFields()) {
-            if (Modifier.isStatic(field.getModifiers()) && field.getType() == String.class) {
-                keys.add((String) field.get(null));
-            }
-        }
-        return keys;
-    }
-
     @Test
     void metricPrefixIsArgus() {
         assertThat(MetricNames.PREFIX).isEqualTo("argus");
-    }
-
-    @Test
-    void everyDeclaredTagKeyIsAllowed() throws IllegalAccessException {
-        assertThat(tagKeys()).isNotEmpty().allMatch(MetricCatalogue.ALLOWED_TAGS::contains);
-        assertThat(MetricCatalogue.ALLOWED_TAGS).containsExactlyInAnyOrderElementsOf(tagKeys());
     }
 
     @Test

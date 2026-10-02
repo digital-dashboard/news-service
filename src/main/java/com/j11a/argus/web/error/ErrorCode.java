@@ -21,6 +21,10 @@ public enum ErrorCode {
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "Method not allowed"),
     NOT_ACCEPTABLE(HttpStatus.NOT_ACCEPTABLE, "Not acceptable"),
     UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported media type"),
+    CONFLICT(HttpStatus.CONFLICT, "Conflict"),
+    PAYLOAD_TOO_LARGE(HttpStatus.CONTENT_TOO_LARGE, "Payload too large"),
+    UNPROCESSABLE(HttpStatus.UNPROCESSABLE_CONTENT, "Unprocessable"),
+    SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Service unavailable"),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Internal error");
 
     private static final String TYPE_PREFIX = "urn:argus:problem:";
@@ -46,12 +50,21 @@ public enum ErrorCode {
     }
 
     public static ErrorCode forStatus(HttpStatusCode statusCode) {
-        return switch (statusCode.value()) {
-            case 404 -> NOT_FOUND;
-            case 405 -> METHOD_NOT_ALLOWED;
-            case 406 -> NOT_ACCEPTABLE;
-            case 415 -> UNSUPPORTED_MEDIA_TYPE;
-            default -> statusCode.is5xxServerError() ? INTERNAL_ERROR : BAD_REQUEST;
+        HttpStatus known = HttpStatus.resolve(statusCode.value());
+        ErrorCode mapped = known == null ? null : switch (known) {
+            case NOT_FOUND -> NOT_FOUND;
+            case METHOD_NOT_ALLOWED -> METHOD_NOT_ALLOWED;
+            case NOT_ACCEPTABLE -> NOT_ACCEPTABLE;
+            case CONFLICT -> CONFLICT;
+            case CONTENT_TOO_LARGE -> PAYLOAD_TOO_LARGE;
+            case UNSUPPORTED_MEDIA_TYPE -> UNSUPPORTED_MEDIA_TYPE;
+            case UNPROCESSABLE_CONTENT -> UNPROCESSABLE;
+            case SERVICE_UNAVAILABLE -> SERVICE_UNAVAILABLE;
+            default -> null;
         };
+        if (mapped != null) {
+            return mapped;
+        }
+        return statusCode.is5xxServerError() ? INTERNAL_ERROR : BAD_REQUEST;
     }
 }

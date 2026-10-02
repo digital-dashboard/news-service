@@ -1,8 +1,10 @@
 package com.j11a.argus.config;
 
+import static com.j11a.argus.testsupport.StartupTestSupport.KEY_32;
+import static com.j11a.argus.testsupport.StartupTestSupport.causeChain;
+import static com.j11a.argus.testsupport.StartupTestSupport.withOverrides;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -12,39 +14,26 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 class ArgusPropertiesTest {
 
     private static final String SHORT_KEY = "short-secret-key-0123456789";
-    private static final String KEY_32 = "0123456789abcdef0123456789abcdef";
+
+    private static final List<String> DEFAULTS = List.of(
+            "argus.db.url=jdbc:postgresql://localhost:5432/argus",
+            "argus.db.username=argus",
+            "argus.db.password=db-password-value",
+            "argus.admin.key=" + KEY_32,
+            "argus.telemetry.otlp-base-url=http://tempo:4318",
+            "argus.telemetry.sampling-probability=1.0");
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(ArgusConfiguration.class);
 
     private static String[] valid(String... overrides) {
-        List<String> properties = new ArrayList<>(List.of(
-                "argus.db.url=jdbc:postgresql://localhost:5432/argus",
-                "argus.db.username=argus",
-                "argus.db.password=db-password-value",
-                "argus.admin.key=" + KEY_32,
-                "argus.telemetry.otlp-base-url=http://tempo:4318",
-                "argus.telemetry.sampling-probability=1.0"));
-        for (String override : overrides) {
-            String name = override.substring(0, override.indexOf('='));
-            properties.removeIf(property -> property.startsWith(name + "="));
-            properties.add(override);
-        }
-        return properties.toArray(String[]::new);
-    }
-
-    private static String failureText(Throwable failure) {
-        StringBuilder text = new StringBuilder();
-        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-            text.append(cause.getMessage()).append('\n');
-        }
-        return text.toString();
+        return withOverrides(DEFAULTS, "", overrides).toArray(String[]::new);
     }
 
     private String captureFailure(String... overrides) {
         String[] holder = new String[1];
         runner.withPropertyValues(valid(overrides))
-                .run(context -> holder[0] = failureText(context.getStartupFailure()));
+                .run(context -> holder[0] = causeChain(context.getStartupFailure()));
         return holder[0];
     }
 

@@ -1,6 +1,7 @@
 package com.j11a.argus.observability.dashboard;
 
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -11,16 +12,16 @@ final class PromqlMetricExtractor {
     private static final Pattern STRING_LITERAL = Pattern.compile("\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`[^`]*`");
     private static final Pattern GRAFANA_VARIABLE = Pattern.compile("\\$\\{[^}]*}|\\$\\w+");
     private static final Pattern RANGE = Pattern.compile("\\[[^\\]]*]");
-    private static final Pattern OFFSET = Pattern.compile("\\boffset\\s+-?\\d+(?:ms|[smhdwy])+");
+    private static final Pattern OFFSET = Pattern.compile("\\boffset\\s+-?\\d+(?:ms|[smhdwy])+", Pattern.CASE_INSENSITIVE);
     private static final Pattern LABEL_MATCHERS = Pattern.compile("\\{[^}]*}");
     private static final Pattern GROUPING_CLAUSE =
-            Pattern.compile("(?<![\\w:])(?:by|without|on|ignoring|group_left|group_right)\\s*\\([^)]*\\)");
+            Pattern.compile("(?<![\\w:])(?:by|without|on|ignoring|group_left|group_right)\\s*\\([^)]*\\)", Pattern.CASE_INSENSITIVE);
     // The lookbehind keeps the unit of 5m and the exponent of 1e3 from being read as names.
     private static final Pattern TOKEN = Pattern.compile("(?<![\\w.:])[A-Za-z_:][\\w:]*");
     private static final Pattern CALL_PAREN = Pattern.compile("\\s*\\(");
     private static final Set<String> KEYWORDS = Set.of(
             "by", "without", "on", "ignoring", "group_left", "group_right",
-            "and", "or", "unless", "offset", "bool", "inf", "nan");
+            "and", "or", "unless", "atan2", "offset", "bool", "inf", "nan");
 
     private PromqlMetricExtractor() {
     }
@@ -33,7 +34,7 @@ final class PromqlMetricExtractor {
         Set<String> metrics = new LinkedHashSet<>();
         Matcher token = TOKEN.matcher(stripped);
         while (token.find()) {
-            if (!KEYWORDS.contains(token.group()) && !isFunctionCall(stripped, token.end())) {
+            if (!KEYWORDS.contains(token.group().toLowerCase(Locale.ROOT)) && !isFunctionCall(stripped, token.end())) {
                 metrics.add(token.group());
             }
         }
