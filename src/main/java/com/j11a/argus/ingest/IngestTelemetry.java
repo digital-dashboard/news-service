@@ -117,27 +117,28 @@ public class IngestTelemetry {
         }
 
         public void completed(String sourceKey, int bodyLength) {
-            stopFetchTimer(sample, sourceKey, FETCHED, NO_REASON);
+            stop(sourceKey, FETCHED, NO_REASON);
             recordFetchSize(sourceKey, bodyLength);
         }
 
         void failed(String reason) {
-            stopFetchTimer(sample, UNKNOWN_SOURCE, FAILED, reason);
+            stop(UNKNOWN_SOURCE, FAILED, reason);
         }
 
         void parseFailed() {
-            stopFetchTimer(sample, UNKNOWN_SOURCE, FETCHED, NO_REASON);
+            stop(UNKNOWN_SOURCE, FETCHED, NO_REASON);
+        }
+
+        private void stop(String source, String outcome, String reason) {
+            sample.stop(Timer.builder(MetricNames.FETCH)
+                    .tag(SOURCE, source)
+                    .tag(OUTCOME, outcome)
+                    .tag(REASON, reason)
+                    .tag(ERROR_TAG, NO_ERROR)
+                    .register(meters));
         }
     }
 
-    private void stopFetchTimer(Timer.Sample sample, String source, String outcome, String reason) {
-        sample.stop(Timer.builder(MetricNames.FETCH)
-                .tag(SOURCE, source)
-                .tag(OUTCOME, outcome)
-                .tag(REASON, reason)
-                .tag(ERROR_TAG, NO_ERROR)
-                .register(meters));
-    }
 
     private void recordFetchSize(String source, int bytes) {
         DistributionSummary.builder(MetricNames.FETCH_SIZE)

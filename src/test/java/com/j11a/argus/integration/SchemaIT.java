@@ -124,7 +124,7 @@ class SchemaIT extends AbstractIntegrationTest {
                 .query()
                 .singleRow();
 
-        assertThat(row.get("consecutive_failures")).isEqualTo(0);
+        assertThat(row).containsEntry("consecutive_failures", 0);
         assertThat(row.get("etag")).isNull();
         assertThat(row.get("last_modified")).isNull();
 

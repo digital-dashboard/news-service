@@ -64,7 +64,6 @@ class PollingTelemetry {
             throw e;
         } catch (RuntimeException e) {
             observation.error(e);
-            LOG.error("Poll {} failed", trigger.tag(), e);
             throw e;
         } finally {
             observation.lowCardinalityKeyValue(MetricNames.Tags.OUTCOME, outcome);

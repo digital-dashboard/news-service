@@ -27,8 +27,6 @@ class IngestMetricsIT extends AbstractIntegrationTest {
     private static final String PATH = "/metrics/sparse.xml";
     /** argus.fetch.retry.max-retries, which the it profile leaves at its default of 2. */
     private static final int MAX_RETRIES = 2;
-    /** The create path tags the fetch with the key resolved from the feed URL's host. */
-    private static final String URL_SOURCE = "127.0.0.1";
     /** The entries are tagged with the stored source, which comes from the feed's site link. */
     private static final String SITE_SOURCE = "sparse.example.test";
     private static final Set<String> AUTOMATIC_TAGS = Set.of("error", "application");
@@ -100,9 +98,9 @@ class IngestMetricsIT extends AbstractIntegrationTest {
         stub.serve("/missing-create.xml", 404, "text/plain", new byte[0]);
         long unknownBefore = timerCount(MetricNames.FETCH, "source", "unknown", "outcome", "failed", "reason", "http_status");
 
-        assertThatThrownBy(() ->
-                feedService.create(new CreateFeedRequest(stub.baseUrl() + "/missing-create.xml", null, Topic.TECH)))
-                .isInstanceOf(ApiException.class);
+        CreateFeedRequest request = new CreateFeedRequest(stub.baseUrl() + "/missing-create.xml", null, Topic.TECH);
+
+        assertThatThrownBy(() -> feedService.create(request)).isInstanceOf(ApiException.class);
 
         assertThat(timerCount(MetricNames.FETCH, "source", "unknown", "outcome", "failed", "reason", "http_status"))
                 .isEqualTo(unknownBefore + 1);

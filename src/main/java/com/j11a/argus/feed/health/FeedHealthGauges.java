@@ -117,7 +117,7 @@ public class FeedHealthGauges {
                     Tags.of(MetricNames.Tags.FEED_ID, feedIdStr),
                     snapshot,
                     s -> s.lastSuccessAt() == null ? -1.0 : Math.max(0.0,
-                            (double) Duration.between(s.lastSuccessAt(), clock.instant()).toSeconds())));
+                            Duration.between(s.lastSuccessAt(), clock.instant()).toSeconds())));
         }
 
         stateGauge.register(stateRows, true);

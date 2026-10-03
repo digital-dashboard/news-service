@@ -95,8 +95,8 @@ public class FeedFetcher {
             if (step instanceof Rejected(var rejection)) {
                 return rejection;
             }
-            if (step instanceof NotModifiedStep notModified) {
-                return new NotModified(current, permanentTarget, notModified.validators());
+            if (step instanceof NotModifiedStep(var notModifiedValidators)) {
+                return new NotModified(current, permanentTarget, notModifiedValidators);
             }
             if (step instanceof Body body) {
                 return new Fetched(body.bytes, body.contentType, current, permanentTarget, body.validators);

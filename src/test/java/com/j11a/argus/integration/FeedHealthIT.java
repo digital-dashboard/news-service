@@ -56,8 +56,8 @@ class FeedHealthIT extends AbstractIntegrationTest {
 
         var initialRow = jdbcClient.sql("SELECT etag, consecutive_failures, last_fetched_at, last_success_at FROM feed WHERE id = :id")
                 .param("id", feedId).query().singleRow();
-        assertThat(initialRow.get("etag")).isEqualTo("\"v1\"");
-        assertThat(initialRow.get("consecutive_failures")).isEqualTo(0);
+        assertThat(initialRow).containsEntry("etag", "\"v1\"")
+                .containsEntry("consecutive_failures", 0);
 
         // Next request returns 304
         stub.serve(PATH, 304, null, new byte[0], Map.of("ETag", "\"v1\""));
@@ -75,7 +75,7 @@ class FeedHealthIT extends AbstractIntegrationTest {
 
         var updatedRow = jdbcClient.sql("SELECT etag, consecutive_failures, last_fetched_at, last_success_at, last_error FROM feed WHERE id = :id")
                 .param("id", feedId).query().singleRow();
-        assertThat(updatedRow.get("consecutive_failures")).isEqualTo(0);
+        assertThat(updatedRow).containsEntry("consecutive_failures", 0);
         assertThat(updatedRow.get("last_error")).isNull();
         Date lastFetched = (Date) updatedRow.get("last_fetched_at");
         Date initialFetched = (Date) initialRow.get("last_fetched_at");
@@ -96,8 +96,8 @@ class FeedHealthIT extends AbstractIntegrationTest {
 
         var row1 = jdbcClient.sql("SELECT consecutive_failures, last_error FROM feed WHERE id = :id")
                 .param("id", feedId).query().singleRow();
-        assertThat(row1.get("consecutive_failures")).isEqualTo(1);
-        assertThat(row1.get("last_error")).isEqualTo("http_status 503");
+        assertThat(row1).containsEntry("consecutive_failures", 1)
+                .containsEntry("last_error", "http_status 503");
         assertThat((String) row1.get("last_error")).doesNotContain("http://").doesNotContain("health.example.test");
 
         // Fails again with 500
@@ -107,8 +107,8 @@ class FeedHealthIT extends AbstractIntegrationTest {
 
         var row2 = jdbcClient.sql("SELECT consecutive_failures, last_error FROM feed WHERE id = :id")
                 .param("id", feedId).query().singleRow();
-        assertThat(row2.get("consecutive_failures")).isEqualTo(2);
-        assertThat(row2.get("last_error")).isEqualTo("http_status 500");
+        assertThat(row2).containsEntry("consecutive_failures", 2)
+                .containsEntry("last_error", "http_status 500");
 
         // Now recovers with 200
         stub.serve(PATH, 200, "application/rss+xml",
@@ -118,7 +118,7 @@ class FeedHealthIT extends AbstractIntegrationTest {
 
         var row3 = jdbcClient.sql("SELECT consecutive_failures, last_error FROM feed WHERE id = :id")
                 .param("id", feedId).query().singleRow();
-        assertThat(row3.get("consecutive_failures")).isEqualTo(0);
+        assertThat(row3).containsEntry("consecutive_failures", 0);
         assertThat(row3.get("last_error")).isNull();
     }
 
@@ -140,6 +140,7 @@ class FeedHealthIT extends AbstractIntegrationTest {
                         startLatch.await();
                         healthUpdater.recordFailure(feedId, "error_" + index, Instant.now());
                     } catch (Exception ignored) {
+                        // A failed worker still counts down; the increment assertion below catches any loss.
                     } finally {
                         doneLatch.countDown();
                     }

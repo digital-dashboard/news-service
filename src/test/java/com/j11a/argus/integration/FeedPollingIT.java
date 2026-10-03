@@ -139,8 +139,8 @@ class FeedPollingIT extends AbstractIntegrationTest {
 
         var failingRow = jdbcClient.sql("SELECT consecutive_failures, last_error FROM feed WHERE id = :id")
                 .param("id", failingFeed.id()).query().singleRow();
-        assertThat(failingRow.get("consecutive_failures")).isEqualTo(1);
-        assertThat(failingRow.get("last_error")).isEqualTo("http_status 500");
+        assertThat(failingRow).containsEntry("consecutive_failures", 1)
+                .containsEntry("last_error", "http_status 500");
     }
 
     @Test

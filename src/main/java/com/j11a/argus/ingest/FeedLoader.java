@@ -69,7 +69,7 @@ public class FeedLoader {
 
     public Loaded load(URI url, FetchValidators validators, String sourceKey) {
         return switch (telemetry.fetch(sourceKey, () -> retryingFetcher.fetch(url, validators, sourceKey))) {
-            case FetchResult.Failed failed -> new Loaded.Failed(failed.reason().tag(), failed.httpStatus());
+            case FetchResult.Failed(var reason, var httpStatus) -> new Loaded.Failed(reason.tag(), httpStatus);
             case FetchResult.NotModified notModified -> new Loaded.NotModified(notModified);
             case FetchResult.Fetched fetched -> parseFetched(fetched, clock.instant());
         };
