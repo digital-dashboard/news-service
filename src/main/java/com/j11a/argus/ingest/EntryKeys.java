@@ -1,12 +1,12 @@
 package com.j11a.argus.ingest;
 
 import com.j11a.argus.crypto.Sha256;
-import com.j11a.argus.url.StoredUrls;
+import com.j11a.argus.url.HttpUrls;
+import com.j11a.argus.url.LinkCleaner;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 import org.jspecify.annotations.Nullable;
 
-/** Interim identity keys; phase 4 re-keys stored articles. */
 public final class EntryKeys {
 
     public static final int MAX_KEY_LENGTH = 512;
@@ -17,11 +17,17 @@ public final class EntryKeys {
 
     public static @Nullable String guidKey(@Nullable String rawGuid, @Nullable String link) {
         String guid = rawGuid == null ? "" : rawGuid.strip();
-        return capped(guid.isEmpty() ? StoredUrls.clean(link) : guid);
+        if (guid.isEmpty()) {
+            return linkKey(link);
+        }
+        if (HttpUrls.parseHttp(guid).isPresent()) {
+            return capped(LinkCleaner.clean(guid));
+        }
+        return capped(guid);
     }
 
     public static @Nullable String linkKey(@Nullable String link) {
-        return capped(StoredUrls.clean(link));
+        return capped(LinkCleaner.clean(link));
     }
 
     private static @Nullable String capped(@Nullable String key) {

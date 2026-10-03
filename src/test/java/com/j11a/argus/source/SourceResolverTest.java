@@ -27,6 +27,16 @@ class SourceResolverTest {
     }
 
     @Test
+    void multiLabelDomainWithSecondLevelCountrySuffix() {
+        assertThat(keyFor(null, "https://x.y.com.au/feed")).isEqualTo("y.com.au");
+    }
+
+    @Test
+    void privateDomainUnderPublicSuffixKeepsPrivateDomain() {
+        assertThat(keyFor(null, "https://foo.blogspot.com/feed")).isEqualTo("foo.blogspot.com");
+    }
+
+    @Test
     void siteLinkHostIsPreferredOverTheFeedHost() {
         assertThat(keyFor("https://www.example.org/", "https://feeds.feedburner.com/x")).isEqualTo("example.org");
     }
