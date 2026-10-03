@@ -16,10 +16,22 @@ public final class SourceResolver {
     }
 
     public static String keyFor(@Nullable String siteLink, URI feedUrl) {
-        String host = hostOf(siteLink);
-        if (host == null) {
-            host = normalise(feedUrl.getHost());
-        }
+        String linkKey = keyOfLink(siteLink);
+        return linkKey != null ? linkKey : hostKey(feedUrl);
+    }
+
+    /** The key of the feed's own host: its registrable domain. */
+    public static String hostKey(URI feedUrl) {
+        return keyOfHost(normalise(feedUrl.getHost()));
+    }
+
+    /** The key of an http(s) link's host, or null when the link is blank, relative or not http(s). */
+    public static @Nullable String keyOfLink(@Nullable String link) {
+        String host = hostOf(link);
+        return host == null ? null : keyOfHost(host);
+    }
+
+    private static String keyOfHost(@Nullable String host) {
         String key = host == null ? "" : registrableDomain(host);
         return key.length() > MAX_KEY_LENGTH ? key.substring(0, MAX_KEY_LENGTH) : key;
     }

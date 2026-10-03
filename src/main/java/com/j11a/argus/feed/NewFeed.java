@@ -7,6 +7,7 @@ public record NewFeed(
         String name,
         String url,
         @Nullable String siteUrl,
+        @Nullable String selfUrl,
         Topic topic,
         @Nullable String language) {
 }

@@ -7,14 +7,14 @@ import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
-/** Plain SQL rather than JPA: the unique url decides, atomically, which of two concurrent creators wins. */
+/** Plain SQL rather than JPA: the unique url and self_url indexes decide, atomically, which of two concurrent creators wins. */
 @Component
 public class FeedInserter {
 
     private static final String INSERT = """
-            INSERT INTO feed (source_id, name, url, site_url, topic, language, enabled, created_at, updated_at)
-            VALUES (:sourceId, :name, :url, :siteUrl, :topic, :language, true, :now, :now)
-            ON CONFLICT (url) DO NOTHING
+            INSERT INTO feed (source_id, name, url, site_url, self_url, topic, language, enabled, created_at, updated_at)
+            VALUES (:sourceId, :name, :url, :siteUrl, :selfUrl, :topic, :language, true, :now, :now)
+            ON CONFLICT DO NOTHING
             RETURNING id
             """;
 
@@ -26,13 +26,14 @@ public class FeedInserter {
         this.clock = clock;
     }
 
-    /** The new feed's id, or empty when a feed with this url already exists. */
+    /** The new feed's id, or empty when a feed already has this url or self url. */
     public Optional<Long> insert(NewFeed feed) {
         return jdbc.sql(INSERT)
                 .param("sourceId", feed.sourceId())
                 .param("name", feed.name())
                 .param("url", feed.url())
                 .param("siteUrl", feed.siteUrl())
+                .param("selfUrl", feed.selfUrl())
                 .param("topic", feed.topic().name())
                 .param("language", feed.language())
                 .param("now", OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))

@@ -110,7 +110,7 @@ public class FeedService {
                 : sources.findOrCreate(SourceResolver.keyFor(parsed.siteLink(), uri), parsed.siteLink());
         timer.completed(source.getKey(), loaded.bodyLength());
         long id = inserter.insert(new NewFeed(source.getId(), nameFor(request, parsed, source), url,
-                        StoredUrls.cleanPublic(parsed.siteLink()), request.topic(), languageOf(parsed)))
+                        StoredUrls.cleanPublic(parsed.siteLink()), null, request.topic(), languageOf(parsed)))
                 .orElseThrow(() -> conflict(url, inserter.findIdByUrl(url)));
         Feed feed = requireFeed(id);
         logCreated(feed, source);
