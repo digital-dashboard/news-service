@@ -39,4 +39,20 @@ class AggregatePollReportTest {
         assertThat(report.skipped()).isEqualTo(2);
         assertThat(report.reports()).containsExactly(completed, notModified, failed);
     }
+
+    @Test
+    void failedFeedIdsListsOnlyTheFailedFeedsInReportOrder() {
+        AggregatePollReport report = AggregatePollReport.of("poll-2", PollTrigger.MANUAL, Duration.ZERO,
+                List.of(IngestReport.failed(5L, "io"), IngestReport.notModified(6L), IngestReport.failed(13L, "io")));
+
+        assertThat(report.failedFeedIds()).containsExactly(5L, 13L);
+    }
+
+    @Test
+    void failedFeedIdsIsEmptyWhenNothingFailed() {
+        AggregatePollReport report = AggregatePollReport.of("poll-3", PollTrigger.MANUAL, Duration.ZERO,
+                List.of(IngestReport.notModified(6L)));
+
+        assertThat(report.failedFeedIds()).isEmpty();
+    }
 }

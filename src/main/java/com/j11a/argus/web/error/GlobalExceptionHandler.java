@@ -1,13 +1,14 @@
 package com.j11a.argus.web.error;
 
+import com.j11a.argus.observability.LogKeys;
+import com.j11a.argus.web.ApiPaths;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
-import tools.jackson.core.JacksonException.Reference;
-import tools.jackson.databind.exc.MismatchedInputException;
+import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import org.springframework.beans.TypeMismatchException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
@@ -23,30 +24,36 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+import tools.jackson.core.JacksonException.Reference;
+import tools.jackson.databind.exc.MismatchedInputException;
 
 // S2638 false positive: Spring 7 declares these handler returns @Nullable as a type-use annotation, which Sonar
 // does not read, so it treats the overrides' matching @Nullable returns as loosening a non-null contract.
 @SuppressWarnings("java:S2638")
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
-    private static final Logger LOG = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     private static final String UNEXPECTED_DETAIL = "An unexpected error occurred.";
     private static final String INVALID_VALUE = "invalid value";
 
     @ExceptionHandler(ApiException.class)
-    ResponseEntity<ProblemDetail> handleApiException(ApiException ex) {
+    ResponseEntity<ProblemDetail> handleApiException(ApiException ex, HttpServletRequest request) {
+        logHandled(ex.code().name(), ex.code().status(), request, ex);
         ProblemDetail problem = Problems.of(ex.code(), ex.getMessage());
         ex.properties().forEach(problem::setProperty);
         return ResponseEntity.status(ex.code().status()).body(problem);
     }
 
     @ExceptionHandler(InvocationRejectedException.class)
-    ResponseEntity<ProblemDetail> handleInvocationRejected(InvocationRejectedException ex) {
+    ResponseEntity<ProblemDetail> handleInvocationRejected(InvocationRejectedException ex,
+            HttpServletRequest request) {
+        logHandled(ErrorCode.POLL_IN_PROGRESS.name(), ErrorCode.POLL_IN_PROGRESS.status(), request, null);
         return Problems.response(ErrorCode.POLL_IN_PROGRESS, "A poll is already in progress.");
     }
 
@@ -57,8 +64,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    ResponseEntity<ProblemDetail> handleUnexpected(Exception ex) {
-        LOG.error("Unhandled exception", ex);
+    ResponseEntity<ProblemDetail> handleUnexpected(Exception ex, HttpServletRequest request) {
+        logHandled(ErrorCode.INTERNAL_ERROR.name(), ErrorCode.INTERNAL_ERROR.status(), request, ex);
         return Problems.response(ErrorCode.INTERNAL_ERROR, UNEXPECTED_DETAIL);
     }
 
@@ -68,6 +75,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         Object problemBody = body == null && ex instanceof ErrorResponse errorResponse ? errorResponse.getBody() : body;
         if (problemBody instanceof ProblemDetail problem && !Problems.hasCode(problem)) {
             Problems.applyContract(problem, ErrorCode.forStatus(statusCode));
+        }
+        if (request instanceof ServletWebRequest servletRequest) {
+            logHandled(codeOf(problemBody, statusCode), statusCode, servletRequest.getRequest(), ex);
         }
         return super.handleExceptionInternal(ex, problemBody, headers, statusCode, request);
     }
@@ -124,6 +134,43 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             }
         }
         return super.handleHttpMessageNotReadable(ex, headers, status, request);
+    }
+
+    private static String codeOf(@Nullable Object body, HttpStatusCode statusCode) {
+        if (body instanceof ProblemDetail problem && Problems.hasCode(problem)) {
+            return String.valueOf(problem.getProperties().get(Problems.CODE_PROPERTY));
+        }
+        return ErrorCode.forStatus(statusCode).name();
+    }
+
+    /**
+     * 5xx is an ERROR with the stack trace; a missing admin key is a WARN; scanner noise outside the API is DEBUG;
+     * every other client error is an INFO. Only the method and path are logged: no query string, no headers.
+     */
+    private static void logHandled(String code, HttpStatusCode status, HttpServletRequest request,
+            @Nullable Exception cause) {
+        boolean serverError = status.is5xxServerError();
+        Level level = levelFor(code, status, request.getRequestURI());
+        log.atLevel(level)
+                .setMessage(serverError ? "Unhandled exception" : "Request rejected: " + code + " (" + status.value()
+                        + ") for " + request.getMethod() + " " + request.getRequestURI())
+                .addKeyValue(LogKeys.CODE, code)
+                .addKeyValue(LogKeys.STATUS, status.value())
+                .addKeyValue(LogKeys.METHOD, request.getMethod())
+                .addKeyValue(LogKeys.PATH, request.getRequestURI())
+                .setCause(serverError ? cause : null)
+                .log();
+    }
+
+    private static Level levelFor(String code, HttpStatusCode status, String path) {
+        if (status.is5xxServerError()) {
+            return Level.ERROR;
+        }
+        if (ErrorCode.ADMIN_KEY_REQUIRED.name().equals(code)) {
+            return Level.WARN;
+        }
+        boolean notFoundOrWrongMethod = status.value() == 404 || status.value() == 405;
+        return notFoundOrWrongMethod && !path.startsWith(ApiPaths.BASE) ? Level.DEBUG : Level.INFO;
     }
 
     private @Nullable ResponseEntity<Object> validationFailed(

@@ -5,6 +5,7 @@ import com.j11a.argus.feed.FeedRepository;
 import com.j11a.argus.ingest.FailureReasons;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.IngestReport;
+import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import java.time.Clock;
@@ -17,8 +18,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.resilience.annotation.ConcurrencyLimit;
 import org.springframework.resilience.annotation.ConcurrencyLimit.ThrottlePolicy;
@@ -28,10 +28,9 @@ import org.springframework.stereotype.Component;
  * Polls every enabled feed on the poll executor. On shutdown the outstanding feeds are cancelled and the poll ends
  * with PollInterruptedException; feeds that already finished stay persisted.
  */
+@Slf4j
 @Component
 public class FeedPoller {
-
-    private static final Logger LOG = LoggerFactory.getLogger(FeedPoller.class);
 
     private final FeedRepository feedRepository;
     private final FeedIngestService ingestService;
@@ -90,7 +89,11 @@ public class FeedPoller {
                 // The executor cancels its remaining tasks when it closes; nobody interrupted this thread.
                 throw interrupted(futures, e);
             } catch (ExecutionException e) {
-                LOG.error("Unexpected execution exception for feed {}", feeds.get(i).getId(), e);
+                log.atError()
+                        .setMessage("Unexpected execution exception for feed " + feeds.get(i).getId())
+                        .addKeyValue(LogKeys.FEED_ID, feeds.get(i).getId())
+                        .setCause(e)
+                        .log();
                 reports.add(IngestReport.failed(feeds.get(i).getId(), FailureReasons.UNEXPECTED_ERROR));
             }
         }
@@ -128,12 +131,20 @@ public class FeedPoller {
         if (!feedRepository.existsById(feed.getId())) {
             return deleted(feed);
         }
-        LOG.error("Failed to ingest feed {}", feed.getId(), e);
+        log.atError()
+                .setMessage("Failed to ingest feed " + feed.getId())
+                .addKeyValue(LogKeys.FEED_ID, feed.getId())
+                .addKeyValue(LogKeys.REASON, FailureReasons.UNEXPECTED_ERROR)
+                .setCause(e)
+                .log();
         return IngestReport.failed(feed.getId(), FailureReasons.UNEXPECTED_ERROR);
     }
 
     private static IngestReport deleted(Feed feed) {
-        LOG.warn("Feed {} was deleted during the poll", feed.getId());
+        log.atWarn()
+                .setMessage("Feed " + feed.getId() + " was deleted during the poll")
+                .addKeyValue(LogKeys.FEED_ID, feed.getId())
+                .log();
         return IngestReport.failed(feed.getId(), FailureReasons.FEED_DELETED);
     }
 }

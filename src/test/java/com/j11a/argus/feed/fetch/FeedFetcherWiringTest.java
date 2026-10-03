@@ -61,7 +61,7 @@ class FeedFetcherWiringTest {
             runner.withPropertyValues("spring.http.clients.read-timeout=500ms").run(context -> {
                 FetchResult result = context.getBean(FeedFetcher.class).fetch(URI.create(server.baseUrl() + "/slow"));
 
-                assertThat(result).isEqualTo(new FetchResult.Failed(FetchFailureReason.TIMEOUT, null));
+                FetchAssertions.assertFailed(result, FetchFailureReason.TIMEOUT, null);
             });
         }
     }

@@ -4,19 +4,23 @@ import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.FeedInserter;
 import com.j11a.argus.feed.FeedRepository;
 import com.j11a.argus.feed.NewFeed;
+import com.j11a.argus.feed.fetch.FetchError;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
 import com.j11a.argus.feed.parse.ParsedFeed;
 import com.j11a.argus.feed.poll.PollProperties;
-import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.FailureReasons;
+import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.FeedLoader;
 import com.j11a.argus.ingest.IngestTelemetry;
+import com.j11a.argus.observability.LogFields;
+import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.security.AdminAccess;
 import com.j11a.argus.source.Source;
 import com.j11a.argus.source.SourceLock;
 import com.j11a.argus.source.SourceResolver;
 import com.j11a.argus.source.SourceService;
+import com.j11a.argus.url.HttpUrls;
 import com.j11a.argus.url.StoredUrls;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
@@ -25,9 +29,9 @@ import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
+import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -35,10 +39,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 public class FeedService {
 
-    private static final Logger LOG = LoggerFactory.getLogger(FeedService.class);
     private static final String INVALID_DETAIL = "The URL did not return a readable feed.";
     /** feed.name is varchar(255). */
     static final int MAX_NAME_LENGTH = 255;
@@ -89,7 +93,7 @@ public class FeedService {
             throw new ApiException(ErrorCode.BAD_REQUEST, "The feed URL must be an absolute http or https URL.");
         }
         inserter.findIdByUrl(url).ifPresent(existingId -> {
-            throw conflict(Optional.of(existingId));
+            throw conflict(url, Optional.of(existingId));
         });
         Source explicitSource = request.sourceId() != null
                 ? sources.findById(request.sourceId())
@@ -106,14 +110,20 @@ public class FeedService {
         timer.completed(source.getKey(), loaded.bodyLength());
         long id = inserter.insert(new NewFeed(source.getId(), nameFor(request, parsed, source), url,
                         StoredUrls.cleanPublic(parsed.siteLink()), request.topic(), languageOf(parsed)))
-                .orElseThrow(() -> conflict(inserter.findIdByUrl(url)));
+                .orElseThrow(() -> conflict(url, inserter.findIdByUrl(url)));
         Feed feed = requireFeed(id);
+        logCreated(feed, source);
         // The feed is committed, so a failed first ingest must not turn a successful create into an error.
         try {
             ingest.ingestParsed(feed, parsed, loaded.fetchedAt());
             healthUpdater.recordSuccess(feed.getId(), loaded.validators(), clock.instant());
         } catch (RuntimeException e) {
-            LOG.error("First ingest of feed {} failed; the feed was created and a refresh will retry", feed.getId(), e);
+            log.atError()
+                    .setMessage("First ingest of feed " + feed.getId()
+                            + " failed; the feed was created and a refresh will retry")
+                    .addKeyValue(LogKeys.FEED_ID, feed.getId())
+                    .setCause(e)
+                    .log();
             healthUpdater.recordFailure(feed.getId(), FailureReasons.FIRST_INGEST_FAILED, clock.instant());
         } finally {
             healthGauges.refreshAfterCommit();
@@ -143,6 +153,11 @@ public class FeedService {
             throw notFound(id);
         }
         healthGauges.refreshAfterCommit();
+        log.atInfo()
+                .setMessage("Feed " + id + (request.enabled() ? " enabled" : " disabled"))
+                .addKeyValue(LogKeys.FEED_ID, id)
+                .addKeyValue(LogKeys.ENABLED, request.enabled())
+                .log();
         return toResponse(requireFeed(id));
     }
 
@@ -156,12 +171,18 @@ public class FeedService {
                 .orElseThrow(() -> notFound(id));
         // Serialises with ingest so a delete cannot race an article_feed insert for the same source.
         sourceLock.acquire(sourceId);
-        jdbc.sql(DELETE_OWNED_ARTICLES).param("feedId", id).update();
+        int removedArticles = jdbc.sql(DELETE_OWNED_ARTICLES).param("feedId", id).update();
         int deleted = jdbc.sql("DELETE FROM feed WHERE id = :id").param("id", id).update();
         if (deleted == 0) {
             throw notFound(id);
         }
         healthGauges.refreshAfterCommit();
+        log.atInfo()
+                .setMessage("Feed " + id + " deleted along with " + removedArticles + " articles")
+                .addKeyValue(LogKeys.FEED_ID, id)
+                .addKeyValue(LogKeys.SOURCE_ID, sourceId)
+                .addKeyValue(LogKeys.ARTICLES_REMOVED, removedArticles)
+                .log();
     }
 
     private Feed requireFeed(long id) {
@@ -179,12 +200,45 @@ public class FeedService {
     private FeedLoader.CreateLoaded.Created download(URI uri, IngestTelemetry.CreateFetchTimer timer) {
         return switch (loader.loadForCreate(uri, timer)) {
             case FeedLoader.CreateLoaded.Created created -> created;
-            case FeedLoader.CreateLoaded.Failed(var reason) ->
-                    throw new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", reason));
+            case FeedLoader.CreateLoaded.Failed failed -> throw rejected(uri, failed);
         };
     }
 
-    private static ApiException conflict(Optional<Long> existingId) {
+    private ApiException rejected(URI uri, FeedLoader.CreateLoaded.Failed failed) {
+        String url = HttpUrls.redact(uri.toString());
+        FetchError error = failed.error();
+        String detail = failed.reason() + (error != null ? " " + error.type() : "");
+        LoggingEventBuilder event = log.atWarn()
+                .setMessage("Feed creation rejected for " + url + ": " + detail)
+                .addKeyValue(LogKeys.URL, url)
+                .addKeyValue(LogKeys.REASON, failed.reason());
+        LogFields.put(event, LogKeys.ERROR_TYPE, error != null ? error.type() : null);
+        LogFields.put(event, LogKeys.ERROR_MESSAGE, error != null ? error.message() : null);
+        LogFields.put(event, LogKeys.CONTENT_TYPE, failed.contentType());
+        LogFields.put(event, LogKeys.BODY_BYTES, failed.bodyBytes());
+        event.log();
+        return new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", failed.reason()));
+    }
+
+    private void logCreated(Feed feed, Source source) {
+        String url = HttpUrls.redact(feed.getUrl());
+        log.atInfo()
+                .setMessage("Feed " + feed.getId() + " created: " + feed.getName() + " (" + source.getKey()
+                        + ", topic " + feed.getTopic() + ") from " + url)
+                .addKeyValue(LogKeys.FEED_ID, feed.getId())
+                .addKeyValue(LogKeys.SOURCE_ID, source.getId())
+                .addKeyValue(LogKeys.SOURCE_KEY, source.getKey())
+                .addKeyValue(LogKeys.URL, url)
+                .log();
+    }
+
+    private ApiException conflict(String url, Optional<Long> existingId) {
+        String redacted = HttpUrls.redact(url);
+        LoggingEventBuilder event = log.atInfo()
+                .setMessage("Feed creation conflicts with an existing feed for " + redacted)
+                .addKeyValue(LogKeys.URL, redacted);
+        LogFields.put(event, LogKeys.EXISTING_FEED_ID, existingId.orElse(null));
+        event.log();
         Map<String, Object> properties = existingId.<Map<String, Object>>map(id -> Map.of("existingFeedId", id))
                 .orElse(Map.of());
         return new ApiException(ErrorCode.FEED_URL_CONFLICT, "A feed with this URL already exists.", properties);

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
+import com.j11a.argus.feed.fetch.FetchValidators;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
 import com.j11a.argus.ingest.FeedIngestService;
@@ -213,5 +214,61 @@ class FeedHealthIT extends AbstractIntegrationTest {
         String lastError = jdbcClient.sql("SELECT last_error FROM feed WHERE id = :id")
                 .param("id", feedId).query(String.class).single();
         assertThat(lastError).hasSize(128);
+    }
+
+    private long healthyFeedId() {
+        stub.serve(PATH, 200, "application/rss+xml",
+                FeedStubServer.utf8("<rss><channel><title>H</title><link>https://health.example.test</link></channel></rss>"));
+        return feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS, null)).id();
+    }
+
+    @Test
+    void recordFailureReturnsTheNewConsecutiveFailureCount() {
+        long feedId = healthyFeedId();
+
+        int first = healthUpdater.recordFailure(feedId, "io", Instant.now());
+        int second = healthUpdater.recordFailure(feedId, "io", Instant.now());
+
+        assertThat(first).isOne();
+        assertThat(second).isEqualTo(2);
+    }
+
+    @Test
+    void recordSuccessReturnsTheCountBeforeTheResetAndZeroOnceReset() {
+        long feedId = healthyFeedId();
+        healthUpdater.recordFailure(feedId, "io", Instant.now());
+        healthUpdater.recordFailure(feedId, "io", Instant.now());
+
+        int before = healthUpdater.recordSuccess(feedId, FetchValidators.EMPTY, Instant.now());
+        int afterReset = healthUpdater.recordSuccess(feedId, FetchValidators.EMPTY, Instant.now());
+
+        assertThat(before).isEqualTo(2);
+        assertThat(afterReset).isZero();
+        assertThat(count("SELECT consecutive_failures FROM feed WHERE id = " + feedId)).isZero();
+    }
+
+    @Test
+    void recordNotModifiedReturnsTheCountBeforeTheResetAndKeepsStoredValidators() {
+        long feedId = healthyFeedId();
+        healthUpdater.recordSuccess(feedId, new FetchValidators("\"v1\"", null), Instant.now());
+        healthUpdater.recordFailure(feedId, "io", Instant.now());
+
+        int before = healthUpdater.recordNotModified(feedId, FetchValidators.EMPTY, Instant.now());
+
+        assertThat(before).isOne();
+        var row = jdbcClient.sql("SELECT etag, consecutive_failures, last_error FROM feed WHERE id = :id")
+                .param("id", feedId).query().singleRow();
+        assertThat(row).containsEntry("etag", "\"v1\"").containsEntry("consecutive_failures", 0);
+        assertThat(row.get("last_error")).isNull();
+    }
+
+    @Test
+    void healthWritesForADeletedFeedReturnZero() {
+        long feedId = healthyFeedId();
+        jdbcClient.sql("DELETE FROM feed WHERE id = :id").param("id", feedId).update();
+
+        assertThat(healthUpdater.recordFailure(feedId, "io", Instant.now())).isZero();
+        assertThat(healthUpdater.recordSuccess(feedId, FetchValidators.EMPTY, Instant.now())).isZero();
+        assertThat(healthUpdater.recordNotModified(feedId, FetchValidators.EMPTY, Instant.now())).isZero();
     }
 }

@@ -1,17 +1,23 @@
 package com.j11a.argus.source;
 
+import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.url.StoredUrls;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
+import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 public class SourceService {
 
@@ -83,6 +89,30 @@ public class SourceService {
             throw new ApiException(ErrorCode.SOURCE_NOT_FOUND, "Source " + id + " does not exist.");
         }
 
-        return queryService.get(id);
+        SourceResponse response = queryService.get(id);
+        logPatched(response, name, homepage, country);
+        return response;
+    }
+
+    private void logPatched(SourceResponse source, @Nullable String name, @Nullable String homepage,
+            @Nullable String country) {
+        Map<String, String> changes = new LinkedHashMap<>();
+        putIfPresent(changes, "name", name);
+        putIfPresent(changes, "homepage", homepage);
+        putIfPresent(changes, "country", country);
+        LoggingEventBuilder event = log.atInfo()
+                .setMessage("Source " + source.id() + " (" + source.key() + ") updated: " + changes)
+                .addKeyValue(LogKeys.SOURCE_ID, source.id())
+                .addKeyValue(LogKeys.SOURCE_KEY, source.key())
+                .addKeyValue(LogKeys.CHANGED_FIELDS, changes.keySet().stream().toList());
+        changes.forEach((field, value) -> event.addKeyValue("new" + Character.toUpperCase(field.charAt(0))
+                + field.substring(1), value));
+        event.log();
+    }
+
+    private static void putIfPresent(Map<String, String> changes, String field, @Nullable String value) {
+        if (value != null) {
+            changes.put(field, value);
+        }
     }
 }

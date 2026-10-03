@@ -113,6 +113,9 @@ class FeedPollerTest {
             assertThat(report.notModified()).isEqualTo(1);
             assertThat(report.reports().getFirst().failureReason()).isEqualTo(FailureReasons.UNEXPECTED_ERROR);
             assertThat(logs.messagesAt(Level.ERROR)).containsExactly("Failed to ingest feed 1");
+            assertThat(LogCapture.keyValues(logs.at(Level.ERROR).getFirst()))
+                    .containsEntry("feedId", 1L)
+                    .containsEntry("reason", FailureReasons.UNEXPECTED_ERROR);
         }
     }
 

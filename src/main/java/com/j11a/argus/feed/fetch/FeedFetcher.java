@@ -12,6 +12,7 @@ import java.net.http.HttpTimeoutException;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.stereotype.Component;
@@ -29,6 +30,8 @@ public class FeedFetcher {
             + "text/xml;q=0.9, */*;q=0.8";
     private static final Set<Integer> REDIRECT_STATUSES = Set.of(301, 302, 303, 307, 308);
     private static final Set<Integer> PERMANENT_REDIRECT_STATUSES = Set.of(301, 308);
+    private static final String HTTP_STATUS_ERROR = "HttpStatus";
+    private static final String INVALID_URL = "InvalidUrl";
     private static final long MAX_READABLE_BYTES = Integer.MAX_VALUE - 16L;
 
     private sealed interface Step {
@@ -116,7 +119,8 @@ public class FeedFetcher {
 
     private Step attempt(URI current, FetchValidators validators, boolean throwOnTransient) {
         if (!HttpUrls.isHttp(current) || HttpUrls.hasUserInfo(current)) {
-            return new Rejected(new Failed(FetchFailureReason.INVALID_URL, null));
+            return new Rejected(new Failed(FetchFailureReason.INVALID_URL, null,
+                    new FetchError(INVALID_URL, invalidUrlDetail(current))));
         }
         try {
             return request(current, validators, throwOnTransient);
@@ -124,22 +128,25 @@ public class FeedFetcher {
             // classify only ever answers TIMEOUT or IO, and both are transient.
             FetchFailureReason reason = classify(e);
             if (throwOnTransient) {
-                throw new RetryableFetchException(reason, null);
+                throw new RetryableFetchException(reason, e);
             }
-            return new Rejected(new Failed(reason, null));
+            return new Rejected(new Failed(reason, null, FetchError.of(e)));
         }
     }
 
     private Hop nextHop(URI current, Redirect redirect, int redirects) {
         if (redirect.location() == null) {
-            return new Stop(new Failed(FetchFailureReason.HTTP_STATUS, redirect.status()));
+            return new Stop(new Failed(FetchFailureReason.HTTP_STATUS, redirect.status(),
+                    new FetchError(HTTP_STATUS_ERROR, redirect.status() + " redirect without a Location header")));
         }
         if (redirects >= properties.maxRedirects()) {
-            return new Stop(new Failed(FetchFailureReason.REDIRECT_LIMIT, redirect.status()));
+            return new Stop(new Failed(FetchFailureReason.REDIRECT_LIMIT, redirect.status(),
+                    new FetchError("RedirectLimit", "more than " + properties.maxRedirects() + " redirects")));
         }
         return HttpUrls.resolve(current, redirect.location())
                 .<Hop>map(next -> new Move(next, PERMANENT_REDIRECT_STATUSES.contains(redirect.status())))
-                .orElseGet(() -> new Stop(new Failed(FetchFailureReason.INVALID_URL, null)));
+                .orElseGet(() -> new Stop(new Failed(FetchFailureReason.INVALID_URL, null,
+                        new FetchError(INVALID_URL, "redirect Location is not a valid URL"))));
     }
 
     private Step request(URI url, FetchValidators validators, boolean throwOnTransient) {
@@ -166,7 +173,7 @@ public class FeedFetcher {
         int code = status.value();
         if (code == 304) {
             if (sent.isEmpty()) {
-                return new Rejected(new Failed(FetchFailureReason.HTTP_STATUS, code));
+                return new Rejected(httpFailure(code));
             }
             String etag = response.getHeaders().getFirst(HttpHeaders.ETAG);
             String lastModified = response.getHeaders().getFirst(HttpHeaders.LAST_MODIFIED);
@@ -177,25 +184,43 @@ public class FeedFetcher {
         }
         if (status.is5xxServerError()) {
             if (throwOnTransient) {
-                throw new RetryableFetchException(FetchFailureReason.HTTP_STATUS, code);
+                throw new RetryableFetchException(FetchFailureReason.HTTP_STATUS, code, httpError(code));
             }
-            return new Rejected(new Failed(FetchFailureReason.HTTP_STATUS, code));
+            return new Rejected(httpFailure(code));
         }
         if (!status.is2xxSuccessful()) {
-            return new Rejected(new Failed(FetchFailureReason.HTTP_STATUS, code));
+            return new Rejected(httpFailure(code));
         }
         long maxBytes = Math.min(properties.maxBodySize().toBytes(), MAX_READABLE_BYTES);
         if (response.getHeaders().getContentLength() > maxBytes) {
-            return new Rejected(new Failed(FetchFailureReason.TOO_LARGE, null));
+            return new Rejected(tooLarge(maxBytes));
         }
         byte[] body = readCapped(response, (int) maxBytes + 1);
         if (body.length > maxBytes) {
-            return new Rejected(new Failed(FetchFailureReason.TOO_LARGE, null));
+            return new Rejected(tooLarge(maxBytes));
         }
         String etag = response.getHeaders().getFirst(HttpHeaders.ETAG);
         String lastModified = response.getHeaders().getFirst(HttpHeaders.LAST_MODIFIED);
         return new Body(body, response.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE),
                 new FetchValidators(etag, lastModified));
+    }
+
+    private static Failed tooLarge(long maxBytes) {
+        return new Failed(FetchFailureReason.TOO_LARGE, null,
+                new FetchError("BodyTooLarge", "body exceeded " + maxBytes + " bytes"));
+    }
+
+    private static FetchError httpError(int code) {
+        HttpStatus known = HttpStatus.resolve(code);
+        return new FetchError(HTTP_STATUS_ERROR, known == null ? String.valueOf(code) : code + " " + known.getReasonPhrase());
+    }
+
+    private static Failed httpFailure(int code) {
+        return new Failed(FetchFailureReason.HTTP_STATUS, code, httpError(code));
+    }
+
+    private static String invalidUrlDetail(URI uri) {
+        return HttpUrls.isHttp(uri) ? "URL contains user-info" : "unsupported scheme " + uri.getScheme();
     }
 
     private static byte[] readCapped(ClientHttpResponse response, int limit) throws IOException {

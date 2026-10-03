@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ch.qos.logback.classic.Level;
+import com.j11a.argus.ingest.IngestReport;
 import com.j11a.argus.observability.MetricNames;
 import com.j11a.argus.testsupport.LogCapture;
 import io.micrometer.core.instrument.Gauge;
@@ -96,5 +97,25 @@ class PollingTelemetryTest {
         assertThat(timer).isNotNull();
         assertThat(timer.count()).isEqualTo(1);
         assertThat(registry.find(MetricNames.POLL_LAST_SUCCESS).gauge().value()).isNaN();
+    }
+
+    @Test
+    void theCompletedLineNamesTheFailedFeedsInTheTextAndAsAField() {
+        AggregatePollReport report = AggregatePollReport.of("p4", PollTrigger.SCHEDULED, Duration.ofMillis(250),
+                List.of(IngestReport.failed(5L, "io"), IngestReport.notModified(6L), IngestReport.failed(13L, "io")));
+
+        try (LogCapture logs = LogCapture.start()) {
+            telemetry.poll("p4", PollTrigger.SCHEDULED, () -> report);
+
+            assertThat(logs.at(Level.INFO)).singleElement().satisfies(event -> {
+                assertThat(event.getFormattedMessage()).contains("failed=2").endsWith("failedFeedIds=[5, 13]");
+                assertThat(LogCapture.keyValues(event))
+                        .containsEntry("failedFeedIds", List.of(5L, 13L))
+                        .containsEntry("failed", 2)
+                        .containsEntry("feedsPolled", 3)
+                        .containsEntry("durationMs", 250L);
+                assertThat(event.getMDCPropertyMap()).containsEntry("pollId", "p4");
+            });
+        }
     }
 }

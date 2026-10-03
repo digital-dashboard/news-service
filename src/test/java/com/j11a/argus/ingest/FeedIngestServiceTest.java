@@ -5,19 +5,24 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.FeedRepository;
+import com.j11a.argus.feed.fetch.FetchError;
 import com.j11a.argus.feed.fetch.FetchResult;
 import com.j11a.argus.feed.fetch.FetchValidators;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
 import com.j11a.argus.feed.parse.ParsedEntry;
 import com.j11a.argus.feed.parse.ParsedFeed;
+import com.j11a.argus.feed.poll.PollProperties;
+import ch.qos.logback.classic.Level;
 import com.j11a.argus.observability.MetricNames;
+import com.j11a.argus.testsupport.LogCapture;
 import com.j11a.argus.source.Source;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
@@ -66,7 +71,7 @@ class FeedIngestServiceTest {
 
         IngestTelemetry telemetry = new IngestTelemetry(ObservationRegistry.create(), registry, Tracer.NOOP);
         service = new FeedIngestService(feedRepository, loader, persister, telemetry,
-                healthUpdater, healthGauges, clock);
+                healthUpdater, healthGauges, new PollProperties("0 */15 * * * *", 8, 3), clock);
     }
 
     private static ParsedFeed oneEntryWithNothingOptional() {
@@ -117,7 +122,7 @@ class FeedIngestServiceTest {
     void refreshOnFailureRecordsHealthFailure() {
         FetchValidators validators = new FetchValidators("\"etag1\"", "Wed, 21 Oct 2026 07:28:00 GMT");
         when(loader.load(URI.create("https://example.test/rss.xml"), validators, "example.test"))
-                .thenReturn(new FeedLoader.Loaded.Failed("http_status", 503));
+                .thenReturn(new FeedLoader.Loaded.Failed("http_status", 503, null, null, null));
 
         IngestReport report = service.refresh(1L);
 
@@ -163,7 +168,7 @@ class FeedIngestServiceTest {
     void anInterruptedLoadWritesNoHealthAndDoesNotRefreshGauges() {
         when(loader.load(FEED_URI, STORED, "example.test")).thenAnswer(invocation -> {
             Thread.currentThread().interrupt();
-            return new FeedLoader.Loaded.Failed("io");
+            return new FeedLoader.Loaded.Failed("io", null, null, null, null);
         });
 
         IngestReport report = service.refresh(1L);
@@ -205,5 +210,72 @@ class FeedIngestServiceTest {
                 .isInstanceOfSatisfying(ApiException.class,
                         e -> assertThat(e.code()).isEqualTo(ErrorCode.FEED_NOT_FOUND));
         verifyNoInteractions(healthUpdater);
+    }
+
+    @Test
+    void anUnexpectedLoaderExceptionIsAWarnNamingTheExceptionTypeAndTheFailureCount() {
+        when(loader.load(FEED_URI, STORED, "example.test")).thenThrow(new IllegalStateException("boom"));
+        when(healthUpdater.recordFailure(anyLong(), any(), any())).thenReturn(2);
+
+        try (LogCapture logs = LogCapture.start()) {
+            assertThatThrownBy(() -> service.refresh(1L)).isInstanceOf(IllegalStateException.class);
+
+            assertThat(logs.at(Level.WARN)).singleElement().satisfies(event ->
+                    assertThat(LogCapture.keyValues(event))
+                            .containsEntry("reason", FailureReasons.UNEXPECTED_ERROR)
+                            .containsEntry("errorType", "IllegalStateException")
+                            .containsEntry("errorMessage", "boom")
+                            .containsEntry("consecutiveFailures", 2)
+                            .containsEntry("url", "https://example.test/rss.xml"));
+            assertThat(logs.at(Level.ERROR)).isEmpty();
+        }
+    }
+
+    @Test
+    void aFailedPersistIsAWarnWithThePersistFailedReasonAndTheCrossingErrorAtTheThreshold() {
+        when(loader.load(FEED_URI, STORED, "example.test"))
+                .thenReturn(new FeedLoader.Loaded.Parsed(oneEntryWithNothingOptional(), FETCHED_AT, STORED));
+        when(persister.persist(any(), any(), any())).thenThrow(new IllegalStateException("db down"));
+        when(healthUpdater.recordFailure(anyLong(), any(), any())).thenReturn(3);
+
+        try (LogCapture logs = LogCapture.start()) {
+            assertThatThrownBy(() -> service.refresh(1L)).isInstanceOf(IllegalStateException.class);
+
+            assertThat(logs.at(Level.WARN)).singleElement().satisfies(event ->
+                    assertThat(LogCapture.keyValues(event)).containsEntry("reason", FailureReasons.PERSIST_FAILED));
+            assertThat(logs.at(Level.ERROR)).singleElement().satisfies(event ->
+                    assertThat(event.getFormattedMessage()).contains("is now failing after 3 consecutive failures"));
+        }
+    }
+
+    @Test
+    void aFailureWithoutAnErrorStillLogsTheReasonAlone() {
+        when(loader.load(FEED_URI, STORED, "example.test"))
+                .thenReturn(new FeedLoader.Loaded.Failed("io", null, null, null, null));
+        when(healthUpdater.recordFailure(anyLong(), any(), any())).thenReturn(1);
+
+        try (LogCapture logs = LogCapture.start()) {
+            service.refresh(1L);
+
+            assertThat(logs.at(Level.WARN)).singleElement().satisfies(event -> {
+                assertThat(event.getFormattedMessage()).isEqualTo(
+                        "Ingest failed for feed 1 (example.test): io; 1 consecutive failures");
+                assertThat(LogCapture.keyValues(event)).doesNotContainKeys("errorType", "errorMessage");
+            });
+        }
+    }
+
+    @Test
+    void aFailureWithAnErrorTypeButNoMessageOmitsTheMessage() {
+        when(loader.load(FEED_URI, STORED, "example.test")).thenReturn(new FeedLoader.Loaded.Failed("io", null,
+                new FetchError("ConnectException", null), null, null));
+        when(healthUpdater.recordFailure(anyLong(), any(), any())).thenReturn(1);
+
+        try (LogCapture logs = LogCapture.start()) {
+            service.refresh(1L);
+
+            assertThat(logs.at(Level.WARN)).singleElement().satisfies(event ->
+                    assertThat(event.getFormattedMessage()).endsWith(": io ConnectException; 1 consecutive failures"));
+        }
     }
 }

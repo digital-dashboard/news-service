@@ -65,6 +65,45 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 - **API & HTTP, JVM & runtime, PostgreSQL & HikariCP, Container:** request rate, latency and status; heap, GC, threads and CPU; pool and database health; container CPU and memory.
 - **Traces, Logs:** slow and errored traces from Tempo, and the live Loki log stream.
 
+## Logs
+
+Argus logs one JSON object per line. The MDC keys (`pollId`, `feedId`, `sourceId`) and the structured fields below are top-level JSON fields, so Loki filters them after `| json`. Every message is also a readable sentence containing the key facts, because the plain-text `dev` profile does not print the fields. The full contract is in `plans/argus-logging.md`.
+
+### Fields
+
+They are emitted only when they apply.
+
+| Field | Meaning |
+|---|---|
+| `feedId`, `sourceId` | The feed and source. MDC during an ingest, a field elsewhere. |
+| `sourceKey` | The source key, for example `cbc.ca`. |
+| `url` | The redacted feed URL: scheme, host, port and path. Never a query string or user-info. |
+| `reason` | The failure reason tag, for example `io`, `http_status`, `not_a_feed`, `persist_failed`. |
+| `httpStatus` | The HTTP status code of the failed fetch. |
+| `errorType` | Simple class name of the root cause, for example `ConnectException` or `SSLHandshakeException`. |
+| `errorMessage` | The root-cause message with URLs redacted, at most 300 characters. |
+| `attempt`, `maxAttempts` | The fetch attempt that failed and how many there are, on retry lines. |
+| `consecutiveFailures`, `failingThreshold` | The feed's health counters. On a recovery line `consecutiveFailures` is the count before the recovery. |
+| `durationMs` | Elapsed time of an ingest or a poll. |
+| `contentType`, `bodyBytes` | The response of a feed that could not be parsed. |
+| `failedFeedIds` | On the poll summary: the feeds that failed in that poll. |
+| `code`, `status`, `method`, `path` | Client errors: the problem code, HTTP status, method and path (no query string). |
+
+Logs never carry the admin key or any request header, article content, article GUIDs or links, a full URL, or a stack trace for an expected failure.
+
+### Levels for feeds
+
+- **WARN**: every failed fetch, parse or persist of a feed, one line each, with every field above that applies.
+- **ERROR**: once, when a feed reaches the failing threshold (default 3 consecutive failures): `Feed N (key) is now failing after 3 consecutive failures; last error: ...`. A stack trace is logged at ERROR only for unexpected exceptions.
+- **INFO**: a retry of a fetch, a feed recovering after failures, an ingest summary, a poll summary, and the audit lines for feed create, delete, enable, disable and source PATCH.
+- Client errors (4xx) are INFO. A missing or wrong admin key is a WARN with method and path only. A 404 or 405 outside `/news/v2` is DEBUG, to keep scanner noise out.
+
+### Example LogQL
+
+- One feed: `{service="argus"} | json | feedId="5"`
+- All errors: `{service="argus", level="ERROR"}`
+- Why feeds fail, readable: `{service="argus"} | json | reason="io" | line_format "{{.sourceKey}} {{.errorType}}: {{.errorMessage}}"`
+
 ## Validating the dashboard
 
 ```bash

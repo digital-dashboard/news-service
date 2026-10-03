@@ -210,7 +210,7 @@ class FeedServiceTest {
 
     @Test
     void aFeedThatCannotBeReadIsRejectedWithTheLoaderReason() {
-        when(loader.loadForCreate(any(URI.class), eq(timer))).thenReturn(new FeedLoader.CreateLoaded.Failed("not_a_feed"));
+        when(loader.loadForCreate(any(URI.class), eq(timer))).thenReturn(new FeedLoader.CreateLoaded.Failed("not_a_feed", null, null, null));
 
         assertThatThrownBy(() -> service.create(request()))
                 .isInstanceOfSatisfying(ApiException.class, e -> {

@@ -15,15 +15,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+@Slf4j
 @Component
 public class DecisionApplier {
-
-    private static final Logger LOG = LoggerFactory.getLogger(DecisionApplier.class);
 
     private static final Comparator<EntryDecision> BY_GUID_KEY =
             Comparator.comparing(DecisionApplier::guidKeyOf, Comparator.nullsLast(Comparator.naturalOrder()));
@@ -104,7 +102,7 @@ public class DecisionApplier {
                 fetchedAt);
         ArticleWriter.WriteResult result = writer.insert(article, nowUtc);
         if (!result.inserted()) {
-            LOG.warn("Insert conflict for source {} feed {}; existing article id {}", sourceId, feedId, result.id());
+            log.warn("Insert conflict for source {} feed {}; existing article id {}", sourceId, feedId, result.id());
         }
         writer.link(result.id(), feedId, entry.contentHash(), nowUtc);
         return result.inserted() ? new Outcome.Inserted() : new Outcome.Updated(UpdateReason.INSERT_CONFLICT.tag());

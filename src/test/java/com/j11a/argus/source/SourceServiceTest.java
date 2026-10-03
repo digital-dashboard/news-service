@@ -57,6 +57,8 @@ class SourceServiceTest {
     @Test
     void patchRedactsTheHomepageQuery() {
         when(spec.update()).thenReturn(1);
+        when(queryService.get(10L)).thenReturn(
+                new SourceResponse(10L, "h.example.test", "H", "https://h.example.test/p", null, 0L, List.of()));
 
         service.patch(10L, new PatchSourceRequest(null, "https://h.example.test/p?token=SECRET", null));
 

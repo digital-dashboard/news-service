@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.j11a.argus.feed.fetch.FeedFetcher;
+import com.j11a.argus.feed.fetch.FetchError;
 import com.j11a.argus.feed.fetch.FetchFailureReason;
 import com.j11a.argus.feed.fetch.FetchResult;
 import com.j11a.argus.feed.fetch.FetchValidators;
@@ -31,6 +32,7 @@ class FeedLoaderTest {
     private static final Instant NOW = Instant.parse("2026-10-02T10:00:00Z");
     private static final byte[] BODY = "<rss/>".getBytes(StandardCharsets.UTF_8);
     private static final String SOURCE = "example.test";
+    private static final FetchError UNAVAILABLE = new FetchError("HttpStatus", "503 Service Unavailable");
 
     private final FeedFetcher fetcher = mock(FeedFetcher.class);
     private final RetryingFeedFetcher retrying = mock(RetryingFeedFetcher.class);
@@ -65,18 +67,20 @@ class FeedLoaderTest {
         when(retrying.fetch(URL, FetchValidators.EMPTY, SOURCE)).thenReturn(fetched());
         when(parser.parse(any(), any(), any())).thenThrow(new FeedParseException(FeedParseException.Reason.NOT_A_FEED));
 
-        assertThat(loader.load(URL, FetchValidators.EMPTY, SOURCE)).isEqualTo(new FeedLoader.Loaded.Failed("not_a_feed"));
+        assertThat(loader.load(URL, FetchValidators.EMPTY, SOURCE)).isEqualTo(new FeedLoader.Loaded.Failed(
+                "not_a_feed", null, new FetchError("FeedParseException", "Feed could not be parsed: NOT_A_FEED"),
+                "application/rss+xml", BODY.length));
     }
 
     @Test
     void aNotModifiedAndAFailedFetchAreCarriedThrough() {
         FetchResult.NotModified notModified = new FetchResult.NotModified(URL, null, FetchValidators.EMPTY);
         when(retrying.fetch(URL, FetchValidators.EMPTY, SOURCE)).thenReturn(notModified)
-                .thenReturn(new FetchResult.Failed(FetchFailureReason.HTTP_STATUS, 503));
+                .thenReturn(new FetchResult.Failed(FetchFailureReason.HTTP_STATUS, 503, UNAVAILABLE));
 
         assertThat(loader.load(URL, FetchValidators.EMPTY, SOURCE)).isEqualTo(new FeedLoader.Loaded.NotModified(notModified));
         assertThat(loader.load(URL, FetchValidators.EMPTY, SOURCE))
-                .isEqualTo(new FeedLoader.Loaded.Failed("http_status", 503));
+                .isEqualTo(new FeedLoader.Loaded.Failed("http_status", 503, UNAVAILABLE, null, null));
     }
 
     @Test
@@ -97,11 +101,12 @@ class FeedLoaderTest {
 
     @Test
     void aFailedCreateFetchIsTimedUnderTheUnknownSource() {
-        when(fetcher.fetch(URL)).thenReturn(new FetchResult.Failed(FetchFailureReason.TIMEOUT, null));
+        FetchError timedOut = new FetchError("HttpTimeoutException", "request timed out");
+        when(fetcher.fetch(URL)).thenReturn(new FetchResult.Failed(FetchFailureReason.TIMEOUT, null, timedOut));
 
         FeedLoader.CreateLoaded loaded = loader.loadForCreate(URL, loader.startCreateFetch());
 
-        assertThat(loaded).isEqualTo(new FeedLoader.CreateLoaded.Failed("timeout"));
+        assertThat(loaded).isEqualTo(new FeedLoader.CreateLoaded.Failed("timeout", timedOut, null, null));
         assertThat(createFetchTimers("unknown", "failed")).isEqualTo(1);
     }
 
@@ -111,7 +116,7 @@ class FeedLoaderTest {
 
         FeedLoader.CreateLoaded loaded = loader.loadForCreate(URL, loader.startCreateFetch());
 
-        assertThat(loaded).isEqualTo(new FeedLoader.CreateLoaded.Failed("not_modified"));
+        assertThat(loaded).isEqualTo(new FeedLoader.CreateLoaded.Failed("not_modified", null, null, null));
     }
 
     @Test
@@ -121,7 +126,9 @@ class FeedLoaderTest {
 
         FeedLoader.CreateLoaded loaded = loader.loadForCreate(URL, loader.startCreateFetch());
 
-        assertThat(loaded).isEqualTo(new FeedLoader.CreateLoaded.Failed("empty"));
+        assertThat(loaded).isEqualTo(new FeedLoader.CreateLoaded.Failed("empty",
+                new FetchError("FeedParseException", "Feed could not be parsed: EMPTY"),
+                "application/rss+xml", BODY.length));
         assertThat(createFetchTimers("unknown", "fetched")).isEqualTo(1);
     }
 }
