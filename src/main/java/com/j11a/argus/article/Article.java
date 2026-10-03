@@ -1,15 +1,20 @@
 package com.j11a.argus.article;
 
+import com.j11a.argus.feed.Feed;
 import com.j11a.argus.source.Source;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
+import jakarta.persistence.JoinTable;
+import jakarta.persistence.ManyToMany;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.Immutable;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
@@ -53,6 +58,12 @@ public class Article {
     @Column(name = "effective_at", nullable = false)
     private Instant effectiveAt;
 
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(name = "article_feed", joinColumns = @JoinColumn(name = "article_id"),
+               inverseJoinColumns = @JoinColumn(name = "feed_id"))
+    @BatchSize(size = 100)
+    private Set<Feed> feeds = Set.of();
+
     protected Article() {
     }
 
@@ -94,5 +105,9 @@ public class Article {
 
     public @Nullable Instant getUpdatedAtUpstream() {
         return updatedAtUpstream;
+    }
+
+    public Set<Feed> getFeeds() {
+        return feeds;
     }
 }
