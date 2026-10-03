@@ -1,7 +1,9 @@
 package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -10,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.j11a.argus.testsupport.AdminKeys;
 import com.j11a.argus.testsupport.Fixtures;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
@@ -269,5 +272,173 @@ class FeedApiIT extends AbstractIntegrationTest {
         createFeed("/api/guarded.xml?token=abc", "WORLD")
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.url").value(stub.baseUrl() + "/api/guarded.xml?token=abc"));
+    }
+
+    @Test
+    void listFeedsWithoutKeyRedactsUrlsAndIncludesHealth() throws Exception {
+        stub.serveFixture("/api/list1.xml", "bbc-like-rss2.xml");
+        createFeed("/api/list1.xml?token=secret", "WORLD").andExpect(status().isCreated());
+
+        mockMvc.perform(get(FEEDS))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].url").value(stub.baseUrl() + "/api/list1.xml"))
+                .andExpect(jsonPath("$.content[0].state").value("healthy"))
+                .andExpect(jsonPath("$.content[0].consecutiveFailures").value(0))
+                .andExpect(jsonPath("$.page.size").value(20))
+                .andExpect(jsonPath("$.page.number").value(0))
+                .andExpect(jsonPath("$.page.totalElements").value(1));
+    }
+
+    @Test
+    void listFeedsWithKeyShowsFullUrls() throws Exception {
+        stub.serveFixture("/api/list2.xml", "bbc-like-rss2.xml");
+        createFeed("/api/list2.xml?token=secret", "WORLD").andExpect(status().isCreated());
+
+        mockMvc.perform(get(FEEDS).header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].url").value(stub.baseUrl() + "/api/list2.xml?token=secret"));
+    }
+
+    @Test
+    void listFeedsInvalidPaginationReturnsBadRequest() throws Exception {
+        mockMvc.perform(get(FEEDS).param("page", "-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(get(FEEDS).param("size", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(get(FEEDS).param("size", "101"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(get(FEEDS).param("size", "invalid"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getFeedByIdIncludesHealthFields() throws Exception {
+        stub.serveFixture("/api/health-check.xml", "bbc-like-rss2.xml");
+        long id = mapper.readTree(createFeed("/api/health-check.xml", "WORLD").andReturn().getResponse()
+                .getContentAsString()).path("id").asLong();
+
+        mockMvc.perform(get(FEEDS + "/" + id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id))
+                .andExpect(jsonPath("$.state").value("healthy"))
+                .andExpect(jsonPath("$.consecutiveFailures").value(0))
+                .andExpect(jsonPath("$.lastFetchedAt").isNotEmpty())
+                .andExpect(jsonPath("$.lastSuccessAt").isNotEmpty())
+                .andExpect(jsonPath("$.lastError").doesNotExist());
+    }
+
+    @Test
+    void patchRequiresAdminKey() throws Exception {
+        mockMvc.perform(patch(FEEDS + "/1").contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ADMIN_KEY_REQUIRED"));
+    }
+
+    @Test
+    void patchInvalidBodyReturnsBadRequest() throws Exception {
+        mockMvc.perform(patch(FEEDS + "/1").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(patch(FEEDS + "/1").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":null}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void patchUnknownFeedReturnsNotFound() throws Exception {
+        mockMvc.perform(patch(FEEDS + "/99999").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("FEED_NOT_FOUND"));
+    }
+
+    @Test
+    void patchUpdatesEnabledState() throws Exception {
+        stub.serveFixture("/api/patch.xml", "bbc-like-rss2.xml");
+        long id = mapper.readTree(createFeed("/api/patch.xml", "WORLD").andReturn().getResponse()
+                .getContentAsString()).path("id").asLong();
+
+        mockMvc.perform(patch(FEEDS + "/" + id).header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(false))
+                .andExpect(jsonPath("$.state").value("disabled"));
+
+        mockMvc.perform(patch(FEEDS + "/" + id).header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(true))
+                .andExpect(jsonPath("$.state").value("healthy"));
+    }
+
+    @Test
+    void deleteRequiresAdminKey() throws Exception {
+        mockMvc.perform(delete(FEEDS + "/1"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ADMIN_KEY_REQUIRED"));
+    }
+
+    @Test
+    void deleteUnknownFeedReturnsNotFound() throws Exception {
+        mockMvc.perform(delete(FEEDS + "/99999").header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("FEED_NOT_FOUND"));
+    }
+
+    @Test
+    void deleteRemovesOrphanArticlesOnlyAndPreservesSharedArticles() throws Exception {
+        stub.serve("/api/del1.xml", 200, RSS, rss("https://del.example.test",
+                item("shared", "Wed, 01 Jan 2025 10:00:00 GMT"),
+                item("orphan-1", "Tue, 01 Jan 2024 10:00:00 GMT")).getBytes(StandardCharsets.UTF_8));
+        stub.serve("/api/del2.xml", 200, RSS, rss("https://del.example.test",
+                item("shared", "Wed, 01 Jan 2025 10:00:00 GMT"),
+                item("other-2", "Mon, 01 Jan 2024 10:00:00 GMT")).getBytes(StandardCharsets.UTF_8));
+
+        long feed1 = mapper.readTree(createFeed("/api/del1.xml", "NEWS").andReturn().getResponse()
+                .getContentAsString()).path("id").asLong();
+        long feed2 = mapper.readTree(createFeed("/api/del2.xml", "NEWS").andReturn().getResponse()
+                .getContentAsString()).path("id").asLong();
+
+        assertThat(jdbcClient.sql("SELECT count(*) FROM feed").query(Long.class).single()).isEqualTo(2);
+        assertThat(jdbcClient.sql("SELECT count(*) FROM article").query(Long.class).single()).isEqualTo(3);
+
+        mockMvc.perform(delete(FEEDS + "/" + feed1).header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isNoContent());
+
+        assertThat(jdbcClient.sql("SELECT count(*) FROM feed WHERE id = :id").param("id", feed1).query(Long.class).single())
+                .isZero();
+        assertThat(jdbcClient.sql("SELECT count(*) FROM feed WHERE id = :id").param("id", feed2).query(Long.class).single())
+                .isOne();
+
+        List<String> remainingTitles = jdbcClient.sql("SELECT title FROM article ORDER BY title").query(String.class).list();
+        assertThat(remainingTitles).containsExactly("other-2", "shared");
+    }
+
+    @Test
+    void manualRefreshAllRequiresAdminKey() throws Exception {
+        mockMvc.perform(post(FEEDS + "/refresh"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ADMIN_KEY_REQUIRED"));
+    }
+
+    @Test
+    void manualRefreshAllExecutesAndReturnsAggregateReport() throws Exception {
+        stub.serveFixture("/api/poll-all.xml", "bbc-like-rss2.xml");
+        createFeed("/api/poll-all.xml", "WORLD").andExpect(status().isCreated());
+
+        mockMvc.perform(post(FEEDS + "/refresh").header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.trigger").value("manual"))
+                .andExpect(jsonPath("$.feedsPolled").value(1))
+                .andExpect(jsonPath("$.succeeded").value(1))
+                .andExpect(jsonPath("$.entriesSeen").value(2))
+                .andExpect(jsonPath("$.unchanged").value(2))
+                .andExpect(jsonPath("$.reports.length()").value(1));
     }
 }

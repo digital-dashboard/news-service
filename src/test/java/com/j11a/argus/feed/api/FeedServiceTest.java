@@ -48,9 +48,13 @@ class FeedServiceTest {
     private final FeedIngestService ingest = mock(FeedIngestService.class);
     private final FeedHealthUpdater healthUpdater = mock(FeedHealthUpdater.class);
     private final FeedHealthGauges healthGauges = mock(FeedHealthGauges.class);
+    private final com.j11a.argus.config.PollProperties properties =
+            new com.j11a.argus.config.PollProperties("0 */15 * * * *", 8, 3);
+    private final org.springframework.jdbc.core.simple.JdbcClient jdbc =
+            mock(org.springframework.jdbc.core.simple.JdbcClient.class);
     private final Clock clock = Clock.fixed(FETCHED_AT, ZoneOffset.UTC);
     private final FeedService service = new FeedService(feeds, inserter, sources, loader, ingest,
-            healthUpdater, healthGauges, clock);
+            healthUpdater, healthGauges, properties, jdbc, clock);
 
     @BeforeEach
     void stubSource() {
@@ -227,5 +231,77 @@ class FeedServiceTest {
                     assertThat(e.code()).isEqualTo(ErrorCode.FEED_NOT_FOUND);
                     assertThat(e.getMessage()).isEqualTo("Feed 404 does not exist.");
                 });
+    }
+
+    @Test
+    void listReturnsPagedFeedResponses() {
+        Feed stored = storedFeed();
+        when(feeds.findAll(any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(stored)));
+
+        org.springframework.data.domain.Page<FeedResponse> page = service.list(0, 20);
+
+        assertThat(page.getContent()).hasSize(1);
+        assertThat(page.getContent().getFirst().id()).isEqualTo(9L);
+    }
+
+    @Test
+    void patchUpdatesEnabledStateAndRefreshesGauges() {
+        Feed stored = storedFeed();
+        when(feeds.findWithSourceById(9L)).thenReturn(Optional.of(stored));
+        when(feeds.save(stored)).thenReturn(stored);
+
+        FeedResponse response = service.patch(9L, new PatchFeedRequest(false));
+
+        verify(stored).setEnabled(false);
+        verify(feeds).save(stored);
+        verify(healthGauges).refresh();
+        assertThat(response.id()).isEqualTo(9L);
+    }
+
+    @Test
+    void patchOfUnknownFeedThrowsNotFound() {
+        when(feeds.findWithSourceById(404L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.patch(404L, new PatchFeedRequest(false)))
+                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.FEED_NOT_FOUND));
+    }
+
+    @Test
+    void deleteRemovesFeedOrphanArticlesAndRefreshesGauges() {
+        Feed stored = storedFeed();
+        when(feeds.findById(9L)).thenReturn(Optional.of(stored));
+        org.springframework.jdbc.core.simple.JdbcClient.StatementSpec selectSpec =
+                mock(org.springframework.jdbc.core.simple.JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.jdbc.core.simple.JdbcClient.MappedQuerySpec<Long> querySpec =
+                mock(org.springframework.jdbc.core.simple.JdbcClient.MappedQuerySpec.class);
+        org.springframework.jdbc.core.simple.JdbcClient.StatementSpec deleteSpec =
+                mock(org.springframework.jdbc.core.simple.JdbcClient.StatementSpec.class);
+
+        when(jdbc.sql(org.mockito.ArgumentMatchers.contains("SELECT article_id"))).thenReturn(selectSpec);
+        when(selectSpec.param("feedId", 9L)).thenReturn(selectSpec);
+        when(selectSpec.query(Long.class)).thenReturn(querySpec);
+        when(querySpec.list()).thenReturn(List.of(101L));
+
+        when(jdbc.sql(org.mockito.ArgumentMatchers.contains("DELETE FROM article"))).thenReturn(deleteSpec);
+        when(deleteSpec.param(org.mockito.ArgumentMatchers.eq("ids"), any())).thenReturn(deleteSpec);
+        when(deleteSpec.update()).thenReturn(1);
+
+        service.delete(9L);
+
+        verify(feeds).delete(stored);
+        verify(feeds).flush();
+        verify(deleteSpec).update();
+        verify(healthGauges).refresh();
+    }
+
+    @Test
+    void deleteOfUnknownFeedThrowsNotFound() {
+        when(feeds.findById(404L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.delete(404L))
+                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.FEED_NOT_FOUND));
+        verifyNoInteractions(healthGauges);
     }
 }

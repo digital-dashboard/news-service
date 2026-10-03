@@ -34,6 +34,16 @@ public final class FeedStubServer implements AutoCloseable {
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
     private final Map<String, Responder> responders = new ConcurrentHashMap<>();
     private final List<Request> requests = new CopyOnWriteArrayList<>();
+    private final java.util.concurrent.atomic.AtomicInteger inFlight = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger peakInFlight = new java.util.concurrent.atomic.AtomicInteger();
+
+    public int peakInFlight() {
+        return peakInFlight.get();
+    }
+
+    public void resetPeakInFlight() {
+        peakInFlight.set(inFlight.get());
+    }
 
     @FunctionalInterface
     private interface Responder {
@@ -72,6 +82,38 @@ public final class FeedStubServer implements AutoCloseable {
         responders.put(path, exchange -> {
             addHeaders(exchange, contentType, extraHeaders);
             exchange.sendResponseHeaders(status, body.length == 0 ? -1 : body.length);
+            if (body.length > 0) {
+                exchange.getResponseBody().write(body);
+            }
+        });
+        return this;
+    }
+
+    public FeedStubServer serveFixtureWithDelay(String path, String fixtureName, long delayMillis) {
+        byte[] body = Fixtures.feed(fixtureName);
+        responders.put(path, exchange -> {
+            sleep(delayMillis);
+            addHeaders(exchange, RSS_TYPE, Map.of());
+            exchange.sendResponseHeaders(200, body.length == 0 ? -1 : body.length);
+            if (body.length > 0) {
+                exchange.getResponseBody().write(body);
+            }
+        });
+        return this;
+    }
+
+    public FeedStubServer serveWithLatch(String path, java.util.concurrent.CountDownLatch enterLatch,
+            java.util.concurrent.CountDownLatch releaseLatch, String fixtureName) {
+        byte[] body = Fixtures.feed(fixtureName);
+        responders.put(path, exchange -> {
+            enterLatch.countDown();
+            try {
+                releaseLatch.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            addHeaders(exchange, RSS_TYPE, Map.of());
+            exchange.sendResponseHeaders(200, body.length == 0 ? -1 : body.length);
             if (body.length > 0) {
                 exchange.getResponseBody().write(body);
             }
@@ -123,19 +165,25 @@ public final class FeedStubServer implements AutoCloseable {
     }
 
     private void handle(HttpExchange exchange) throws IOException {
-        Map<String, String> headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-        exchange.getRequestHeaders().forEach((name, values) -> headers.put(name, String.join(", ", values)));
-        requests.add(new Request(exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
-                exchange.getRequestURI().getRawQuery(), Collections.unmodifiableMap(headers)));
-        Responder responder = responders.get(exchange.getRequestURI().getPath());
-        try (exchange) {
-            if (responder == null) {
-                exchange.sendResponseHeaders(404, -1);
-                return;
+        int current = inFlight.incrementAndGet();
+        peakInFlight.accumulateAndGet(current, Math::max);
+        try {
+            Map<String, String> headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+            exchange.getRequestHeaders().forEach((name, values) -> headers.put(name, String.join(", ", values)));
+            requests.add(new Request(exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
+                    exchange.getRequestURI().getRawQuery(), Collections.unmodifiableMap(headers)));
+            Responder responder = responders.get(exchange.getRequestURI().getPath());
+            try (exchange) {
+                if (responder == null) {
+                    exchange.sendResponseHeaders(404, -1);
+                    return;
+                }
+                responder.respond(exchange);
+            } catch (IOException clientWentAway) {
+                // The fetcher aborting a connection mid-body (timeout, size cap) is expected.
             }
-            responder.respond(exchange);
-        } catch (IOException clientWentAway) {
-            // The fetcher aborting a connection mid-body (timeout, size cap) is expected.
+        } finally {
+            inFlight.decrementAndGet();
         }
     }
 

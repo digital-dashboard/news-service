@@ -9,6 +9,7 @@ argus:
     key: integration-test-admin-key-0123456789abcdef
   poll:
     cron: "-"
+    concurrency: 2
 
 management:
   opentelemetry:

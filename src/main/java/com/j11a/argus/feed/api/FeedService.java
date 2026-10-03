@@ -16,14 +16,21 @@ import com.j11a.argus.source.SourceService;
 import com.j11a.argus.url.Links;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
+import com.j11a.argus.config.PollProperties;
 import java.net.URI;
 import java.time.Clock;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Deliberately not transactional: the download must not hold a connection. The source upsert and the feed insert
@@ -46,11 +53,13 @@ public class FeedService {
     private final FeedIngestService ingest;
     private final FeedHealthUpdater healthUpdater;
     private final FeedHealthGauges healthGauges;
+    private final PollProperties properties;
+    private final JdbcClient jdbc;
     private final Clock clock;
 
     public FeedService(FeedRepository feeds, FeedInserter inserter, SourceService sources, FeedLoader loader,
             FeedIngestService ingest, FeedHealthUpdater healthUpdater,
-            FeedHealthGauges healthGauges, Clock clock) {
+            FeedHealthGauges healthGauges, PollProperties properties, JdbcClient jdbc, Clock clock) {
         this.feeds = feeds;
         this.inserter = inserter;
         this.sources = sources;
@@ -58,6 +67,8 @@ public class FeedService {
         this.ingest = ingest;
         this.healthUpdater = healthUpdater;
         this.healthGauges = healthGauges;
+        this.properties = properties;
+        this.jdbc = jdbc;
         this.clock = clock;
     }
 
@@ -88,13 +99,52 @@ public class FeedService {
         } finally {
             healthGauges.refresh();
         }
-        return FeedResponse.of(feed, AdminAccess.isAdmin());
+        return FeedResponse.of(feed, AdminAccess.isAdmin(), properties.failingThreshold());
     }
 
     public FeedResponse get(long id) {
         Feed feed = feeds.findWithSourceById(id)
                 .orElseThrow(() -> new ApiException(ErrorCode.FEED_NOT_FOUND, "Feed " + id + " does not exist."));
-        return FeedResponse.of(feed, AdminAccess.isAdmin());
+        return FeedResponse.of(feed, AdminAccess.isAdmin(), properties.failingThreshold());
+    }
+
+    @Transactional(readOnly = true)
+    public Page<FeedResponse> list(int page, int size) {
+        PageRequest pageRequest = PageRequest.of(page, size, Sort.by("id").ascending());
+        return feeds.findAll(pageRequest)
+                .map(feed -> FeedResponse.of(feed, AdminAccess.isAdmin(), properties.failingThreshold()));
+    }
+
+    @Transactional
+    public FeedResponse patch(long id, PatchFeedRequest request) {
+        Feed feed = feeds.findWithSourceById(id)
+                .orElseThrow(() -> new ApiException(ErrorCode.FEED_NOT_FOUND, "Feed " + id + " does not exist."));
+        feed.setEnabled(request.enabled());
+        Feed saved = feeds.save(feed);
+        healthGauges.refresh();
+        return FeedResponse.of(saved, AdminAccess.isAdmin(), properties.failingThreshold());
+    }
+
+    @Transactional
+    public void delete(long id) {
+        Feed feed = feeds.findById(id)
+                .orElseThrow(() -> new ApiException(ErrorCode.FEED_NOT_FOUND, "Feed " + id + " does not exist."));
+        List<Long> articleIds = jdbc.sql("SELECT article_id FROM article_feed WHERE feed_id = :feedId")
+                .param("feedId", id)
+                .query(Long.class)
+                .list();
+        feeds.delete(feed);
+        feeds.flush();
+        if (!articleIds.isEmpty()) {
+            jdbc.sql("""
+                    DELETE FROM article
+                    WHERE id IN (:ids)
+                      AND NOT EXISTS (SELECT 1 FROM article_feed af WHERE af.article_id = article.id)
+                    """)
+                    .param("ids", articleIds)
+                    .update();
+        }
+        healthGauges.refresh();
     }
 
     private FeedLoader.Loaded.CreateParsed download(URI uri) {

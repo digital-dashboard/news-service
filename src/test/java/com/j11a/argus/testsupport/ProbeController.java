@@ -79,4 +79,9 @@ public class ProbeController {
     public String boom() {
         throw new IllegalStateException(SECRET_DETAIL);
     }
+
+    @GetMapping("/rejected")
+    public String rejected() {
+        throw new org.springframework.resilience.InvocationRejectedException("limit reached", this);
+    }
 }
