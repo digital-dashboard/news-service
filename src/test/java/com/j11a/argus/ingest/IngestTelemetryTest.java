@@ -118,11 +118,11 @@ class IngestTelemetryTest {
 
         assertThat(decisionCount("inserted", "none")).isEqualTo(2);
         assertThat(decisionCount("updated", "content_changed")).isEqualTo(1);
-        assertThat(decisionCount("updated", "timestamp_only")).isEqualTo(0);
+        assertThat(decisionCount("updated", "timestamp_only")).isZero();
         assertThat(decisionCount("linked", "none")).isEqualTo(3);
-        assertThat(decisionCount("unchanged", "none")).isEqualTo(0);
+        assertThat(decisionCount("unchanged", "none")).isZero();
         assertThat(decisionCount("skipped", "missing_identity")).isEqualTo(4);
-        assertThat(decisionCount("skipped", "batch_duplicate")).isEqualTo(0);
+        assertThat(decisionCount("skipped", "batch_duplicate")).isZero();
     }
 
     private double decisionCount(String decision, String reason) {

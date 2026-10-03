@@ -118,7 +118,7 @@ class DecisionApplierTest {
         assertThat(counts.updated()).containsEntry("timestamp_only", 1);
         verify(writer, never()).replaceGuid(anyLong(), any(), any(), any());
         verify(writer, never()).rewriteContent(any(), any());
-        verify(writer).advanceTimestamps(eq(301L), eq(NOW), eq(NOW), eq(true), eq(NOW_UTC));
+        verify(writer).advanceTimestamps(301L, NOW, NOW, true, NOW_UTC);
         verify(writer).link(301L, 2L, "hash-g3", NOW_UTC);
     }
 

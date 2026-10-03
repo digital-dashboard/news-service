@@ -114,7 +114,7 @@ class DedupMetricsIT extends AbstractIntegrationTest {
                         MetricNames.INGEST_LOCK_WAIT).contains(meter.getId().getName()))
                 .toList();
         assertThat(dedupMeters).isNotEmpty().allSatisfy(meter ->
-                assertThat(meter.getId().getTags()).extracting(Tag::getKey).doesNotContainAnyElementsOf(FORBIDDEN_TAG_KEYS));
+                assertThat(meter.getId().getTags()).isNotEmpty().extracting(Tag::getKey).doesNotContainAnyElementsOf(FORBIDDEN_TAG_KEYS));
     }
 
     @Test

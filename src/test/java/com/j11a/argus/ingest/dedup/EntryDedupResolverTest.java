@@ -103,7 +103,7 @@ class EntryDedupResolverTest {
         Resolution res = resolver.resolve(input);
 
         assertThat(lookup.linkKeyCalls.get(0)).doesNotContain(homeKey);
-        assertThat(res.linkFallbacks().get(LinkFallback.GUARDED_HOMEPAGE)).isEqualTo(1);
+        assertThat(res.linkFallbacks()).containsEntry(LinkFallback.GUARDED_HOMEPAGE, 1);
         assertThat(res.decisions().get(0)).isInstanceOf(EntryDecision.Insert.class);
     }
 
@@ -115,7 +115,7 @@ class EntryDedupResolverTest {
         Resolution res = resolver.resolve(input);
 
         assertThat(lookup.linkKeyCalls.get(0)).isEmpty();
-        assertThat(res.linkFallbacks().get(LinkFallback.GUARDED_HOMEPAGE)).isEqualTo(1);
+        assertThat(res.linkFallbacks()).containsEntry(LinkFallback.GUARDED_HOMEPAGE, 1);
         assertThat(res.decisions().get(0)).isInstanceOf(EntryDecision.Insert.class);
     }
 
@@ -128,7 +128,7 @@ class EntryDedupResolverTest {
         Resolution res = resolver.resolve(input);
 
         assertThat(lookup.linkKeyCalls.get(0)).doesNotContain("https://example.com/shared");
-        assertThat(res.linkFallbacks().get(LinkFallback.GUARDED_SHARED)).isEqualTo(2);
+        assertThat(res.linkFallbacks()).containsEntry(LinkFallback.GUARDED_SHARED, 2);
         assertThat(res.decisions().get(0)).isInstanceOf(EntryDecision.Insert.class);
         assertThat(res.decisions().get(1)).isInstanceOf(EntryDecision.Insert.class);
     }
@@ -229,7 +229,6 @@ class EntryDedupResolverTest {
     void guidMatchOnNotYetLinkedFeedGivesLinkOrUpdateTimestampOnly() {
         Instant t1 = Instant.parse("2026-10-03T10:00:00Z");
         Instant t2 = Instant.parse("2026-10-03T11:00:00Z");
-        String hash = ContentHash.of("Title", "excerpt", List.of("news"));
 
         ParsedEntry eSameTime = entry("g1", "https://example.com/1", "Title", null, t1);
         lookup.returnArticles = List.of(new ExistingArticle(100L, "g1", "https://example.com/1", t1, false, null));
@@ -254,7 +253,7 @@ class EntryDedupResolverTest {
 
         Resolution res = resolver.resolve(input);
 
-        assertThat(res.linkFallbacks().get(LinkFallback.GUID_REPLACED)).isEqualTo(1);
+        assertThat(res.linkFallbacks()).containsEntry(LinkFallback.GUID_REPLACED, 1);
         assertThat(res.decisions().get(0)).isInstanceOf(EntryDecision.Unchanged.class);
         EntryDecision.Unchanged decision = (EntryDecision.Unchanged) res.decisions().get(0);
         assertThat(decision.guidReplaced()).isTrue();
@@ -292,7 +291,7 @@ class EntryDedupResolverTest {
         assertThat(res.decisions().get(0)).isInstanceOf(EntryDecision.Unchanged.class);
         assertThat(((EntryDecision.Unchanged) res.decisions().get(0)).articleId()).isEqualTo(1L);
         assertThat(res.decisions().get(1)).isInstanceOf(EntryDecision.Insert.class);
-        assertThat(res.linkFallbacks().get(LinkFallback.GUARDED_SHARED)).isEqualTo(1);
+        assertThat(res.linkFallbacks()).containsEntry(LinkFallback.GUARDED_SHARED, 1);
         assertThat(res.linkFallbacks().get(LinkFallback.GUID_REPLACED)).isZero();
     }
 
@@ -309,7 +308,7 @@ class EntryDedupResolverTest {
         EntryDecision.Unchanged decision = (EntryDecision.Unchanged) res.decisions().get(0);
         assertThat(decision.articleId()).isEqualTo(1L);
         assertThat(decision.guidReplaced()).isTrue();
-        assertThat(res.linkFallbacks().get(LinkFallback.GUID_REPLACED)).isEqualTo(1);
+        assertThat(res.linkFallbacks()).containsEntry(LinkFallback.GUID_REPLACED, 1);
         assertThat(res.linkFallbacks().get(LinkFallback.GUARDED_SHARED)).isZero();
     }
 
@@ -325,7 +324,7 @@ class EntryDedupResolverTest {
         Resolution res = resolver.resolve(input);
 
         assertThat(res.decisions().get(0)).isInstanceOf(EntryDecision.Insert.class);
-        assertThat(res.linkFallbacks().get(LinkFallback.GUARDED_SHARED)).isEqualTo(1);
+        assertThat(res.linkFallbacks()).containsEntry(LinkFallback.GUARDED_SHARED, 1);
     }
 
     @Test

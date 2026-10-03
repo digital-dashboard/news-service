@@ -13,6 +13,12 @@ public class ArticleWriter {
     /** inserted is true for a fresh row: xmax = 0 tells it apart from the ON CONFLICT path, which rewrites the row. */
     public record WriteResult(long id, boolean inserted) {}
 
+    private static final String CONTENT_HASH = "contentHash";
+    private static final String UPDATED_AT_UPSTREAM = "updatedAtUpstream";
+    private static final String EFFECTIVE_AT = "effectiveAt";
+    private static final String ID = "id";
+    private static final String NOW = "now";
+
     private static final String INSERT_ARTICLE = """
             INSERT INTO article (source_id, guid_key, raw_guid, link_key, link, content_hash, title, excerpt, author,
                                  image_url, categories, published_at, updated_at_upstream, effective_at, fetched_at,
@@ -67,15 +73,15 @@ public class ArticleWriter {
                 .param("rawGuid", a.rawGuid())
                 .param("linkKey", a.linkKey())
                 .param("link", a.link())
-                .param("contentHash", a.contentHash())
+                .param(CONTENT_HASH, a.contentHash())
                 .param("title", a.title())
                 .param("excerpt", a.excerpt())
                 .param("author", a.author())
                 .param("imageUrl", a.imageUrl())
                 .param("categories", a.categories().toArray(String[]::new))
                 .param("publishedAt", utc(a.publishedAt()))
-                .param("updatedAtUpstream", utc(a.updatedAtUpstream()))
-                .param("effectiveAt", utc(a.effectiveAt()))
+                .param(UPDATED_AT_UPSTREAM, utc(a.updatedAtUpstream()))
+                .param(EFFECTIVE_AT, utc(a.effectiveAt()))
                 .param("fetchedAt", utc(a.fetchedAt()))
                 .param("modifiedAt", now)
                 .query((rs, rowNum) -> new WriteResult(rs.getLong("id"), rs.getBoolean("inserted")))
@@ -84,7 +90,7 @@ public class ArticleWriter {
 
     public void rewriteContent(ArticleEdit e, OffsetDateTime now) {
         jdbc.sql(REWRITE_CONTENT)
-                .param("id", e.id())
+                .param(ID, e.id())
                 .param("linkKey", e.linkKey())
                 .param("link", e.link())
                 .param("title", e.title())
@@ -93,31 +99,31 @@ public class ArticleWriter {
                 .param("imageUrl", e.imageUrl())
                 .param("categories", e.categories().toArray(String[]::new))
                 .param("publishedAt", utc(e.publishedAt()))
-                .param("updatedAtUpstream", utc(e.updatedAtUpstream()))
-                .param("effectiveAt", utc(e.effectiveAt()))
+                .param(UPDATED_AT_UPSTREAM, utc(e.updatedAtUpstream()))
+                .param(EFFECTIVE_AT, utc(e.effectiveAt()))
                 .param("dated", e.dated())
-                .param("contentHash", e.contentHash())
-                .param("now", now)
+                .param(CONTENT_HASH, e.contentHash())
+                .param(NOW, now)
                 .update();
     }
 
     public void advanceTimestamps(long id, @Nullable Instant updatedAtUpstream, Instant effectiveAt, boolean dated,
             OffsetDateTime now) {
         jdbc.sql(ADVANCE_TIMESTAMPS)
-                .param("id", id)
-                .param("updatedAtUpstream", utc(updatedAtUpstream))
-                .param("effectiveAt", utc(effectiveAt))
+                .param(ID, id)
+                .param(UPDATED_AT_UPSTREAM, utc(updatedAtUpstream))
+                .param(EFFECTIVE_AT, utc(effectiveAt))
                 .param("dated", dated)
-                .param("now", now)
+                .param(NOW, now)
                 .update();
     }
 
     public void replaceGuid(long id, String guidKey, @Nullable String rawGuid, OffsetDateTime now) {
         jdbc.sql(REPLACE_GUID)
-                .param("id", id)
+                .param(ID, id)
                 .param("guidKey", guidKey)
                 .param("rawGuid", rawGuid)
-                .param("now", now)
+                .param(NOW, now)
                 .update();
     }
 
@@ -125,8 +131,8 @@ public class ArticleWriter {
         jdbc.sql(LINK_FEED)
                 .param("articleId", articleId)
                 .param("feedId", feedId)
-                .param("now", now)
-                .param("contentHash", contentHash)
+                .param(NOW, now)
+                .param(CONTENT_HASH, contentHash)
                 .update();
     }
 

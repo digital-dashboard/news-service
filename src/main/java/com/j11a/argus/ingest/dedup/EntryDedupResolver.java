@@ -208,10 +208,11 @@ public final class EntryDedupResolver {
             return new EntryDecision.Link(survivor, existing.id(), guidReplaced);
         }
 
-        if (existing.feedContentHash() == null) {
+        String feedHash = existing.feedContentHash();
+        if (feedHash == null) {
             return new EntryDecision.Unchanged(survivor, existing.id(), guidReplaced, true);
         }
-        if (!existing.feedContentHash().equals(survivor.contentHash())) {
+        if (!feedHash.equals(survivor.contentHash())) {
             return new EntryDecision.Update(survivor, existing.id(), UpdateReason.CONTENT_CHANGED, guidReplaced);
         }
         if (timeAdvanced) {
@@ -228,8 +229,9 @@ public final class EntryDedupResolver {
     }
 
     private static boolean upstreamTimeAdvanced(ParsedEntry entry, ExistingArticle existing) {
-        return entry.updatedAt() != null
-                && (existing.updatedAtUpstream() == null || entry.updatedAt().isAfter(existing.updatedAtUpstream()));
+        Instant updated = entry.updatedAt();
+        Instant stored = existing.updatedAtUpstream();
+        return updated != null && (stored == null || updated.isAfter(stored));
     }
 
     private static Map<LinkFallback, Integer> initialFallbackCounts() {

@@ -63,8 +63,9 @@ public class SourceService {
         if (request.isEmpty()) {
             throw ApiException.validationFailed("request", "at least one field must be provided");
         }
-        String name = request.name() != null ? request.name().strip() : null;
-        if (request.name() != null && name.isEmpty()) {
+        String rawName = request.name();
+        String name = rawName == null ? null : rawName.strip();
+        if (name != null && name.isEmpty()) {
             throw ApiException.validationFailed("name", "must not be blank");
         }
         String homepage = request.homepage() != null ? StoredUrls.cleanPublic(request.homepage()) : null;

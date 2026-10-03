@@ -3,12 +3,15 @@ package com.j11a.argus.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import static org.awaitility.Awaitility.await;
+
 import com.j11a.argus.source.SourceLock;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -20,6 +23,9 @@ class SourceLockIT extends AbstractIntegrationTest {
 
     @Autowired
     private PlatformTransactionManager txManager;
+
+    @Autowired
+    private JdbcClient jdbc;
 
     @Test
     void acquireOutsideTransactionThrowsIllegalTransactionStateException() {
@@ -49,7 +55,7 @@ class SourceLockIT extends AbstractIntegrationTest {
                 holderAcquired.countDown();
                 try {
                     releaseHolder.await();
-                    Thread.sleep(holdMillis);
+                    await().pollDelay(Duration.ofMillis(holdMillis)).until(() -> true);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -67,7 +73,7 @@ class SourceLockIT extends AbstractIntegrationTest {
         });
 
         waiter.start();
-        Thread.sleep(50);
+        await().atMost(Duration.ofSeconds(10)).until(this::advisoryLockRequestIsWaiting);
         releaseHolder.countDown();
 
         holder.join();
@@ -76,5 +82,12 @@ class SourceLockIT extends AbstractIntegrationTest {
         Duration wait = waitRef.get();
         assertThat(wait).isNotNull();
         assertThat(wait.toMillis()).isGreaterThanOrEqualTo(holdMillis - 50);
+    }
+
+    private boolean advisoryLockRequestIsWaiting() {
+        Long waiting = jdbc.sql("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted")
+                .query(Long.class)
+                .single();
+        return waiting > 0;
     }
 }

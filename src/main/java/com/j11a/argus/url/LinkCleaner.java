@@ -101,25 +101,24 @@ public final class LinkCleaner {
         List<String> surviving = new ArrayList<>();
         String[] segments = rawQuery.split("&", -1);
         for (String segment : segments) {
-            if (segment.isEmpty()) {
-                continue;
+            if (!isDroppedParam(segment)) {
+                surviving.add(segment);
             }
-            int eq = segment.indexOf('=');
-            String rawName = eq >= 0 ? segment.substring(0, eq) : segment;
-            String rawValue = eq >= 0 ? segment.substring(eq + 1) : null;
-            String decodedLowerName = URLDecoder.decode(rawName, StandardCharsets.UTF_8).toLowerCase(Locale.ROOT);
-            if (TrackingParams.isTracking(decodedLowerName)) {
-                continue;
-            }
-            if (decodedLowerName.equals("amp") && "1".equals(rawValue)) {
-                continue;
-            }
-            if (decodedLowerName.equals("outputtype") && "amp".equalsIgnoreCase(rawValue)) {
-                continue;
-            }
-            surviving.add(segment);
         }
         Collections.sort(surviving);
         return surviving;
+    }
+
+    private static boolean isDroppedParam(String segment) {
+        if (segment.isEmpty()) {
+            return true;
+        }
+        int eq = segment.indexOf('=');
+        String rawName = eq >= 0 ? segment.substring(0, eq) : segment;
+        String rawValue = eq >= 0 ? segment.substring(eq + 1) : null;
+        String decodedLowerName = URLDecoder.decode(rawName, StandardCharsets.UTF_8).toLowerCase(Locale.ROOT);
+        return TrackingParams.isTracking(decodedLowerName)
+                || (decodedLowerName.equals("amp") && "1".equals(rawValue))
+                || (decodedLowerName.equals("outputtype") && "amp".equalsIgnoreCase(rawValue));
     }
 }

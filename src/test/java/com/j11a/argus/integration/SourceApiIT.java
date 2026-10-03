@@ -14,14 +14,11 @@ import com.j11a.argus.testsupport.AdminKeys;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
-import tools.jackson.databind.json.JsonMapper;
 
 class SourceApiIT extends AbstractIntegrationTest {
 
     private static final String SOURCES = "/news/v2/sources";
     private static final String FEEDS = "/news/v2/feeds";
-
-    private final JsonMapper mapper = JsonMapper.builder().build();
 
     private ResultActions adminPatch(String path, String body) throws Exception {
         return mockMvc.perform(patch(path)

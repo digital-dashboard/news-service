@@ -6,7 +6,6 @@ import com.j11a.argus.article.ArticleEdit;
 import com.j11a.argus.article.ArticleWriter;
 import com.j11a.argus.article.NewArticle;
 import com.j11a.argus.feed.Topic;
-import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -109,7 +108,7 @@ class ArticleWriterIT extends AbstractIntegrationTest {
 
         assertThat(articleTime("fetched_at", result.id())).isEqualTo(T0);
         assertThat(articleTime("modified_at", result.id())).isEqualTo(T1);
-        assertThat(row.get("title")).isEqualTo("Updated Title");
+        assertThat(row).containsEntry("title", "Updated Title");
     }
 
     @Test
@@ -138,8 +137,8 @@ class ArticleWriterIT extends AbstractIntegrationTest {
                 .param("id", result.id())
                 .query().singleRow();
 
-        assertThat(row.get("author")).isEqualTo("Alice");
-        assertThat(row.get("image_url")).isEqualTo("https://img.test/pic.jpg");
+        assertThat(row).containsEntry("author", "Alice");
+        assertThat(row).containsEntry("image_url", "https://img.test/pic.jpg");
     }
 
     @Test
@@ -242,7 +241,7 @@ class ArticleWriterIT extends AbstractIntegrationTest {
                 .param("fid", feedId)
                 .query().singleRow();
         assertThat(firstSeenAt(result.id())).isEqualTo(T0);
-        assertThat(linkRow1.get("content_hash")).isEqualTo("hash-a");
+        assertThat(linkRow1).containsEntry("content_hash", "hash-a");
 
         String xminBefore = linkRowVersion(result.id());
 
@@ -254,7 +253,7 @@ class ArticleWriterIT extends AbstractIntegrationTest {
                 .param("fid", feedId)
                 .query().singleRow();
         assertThat(firstSeenAt(result.id())).isEqualTo(T0);
-        assertThat(linkRow2.get("content_hash")).isEqualTo("hash-a");
+        assertThat(linkRow2).containsEntry("content_hash", "hash-a");
 
         writer.link(result.id(), feedId, "hash-b", T2);
         Map<String, Object> linkRow3 = jdbcClient.sql("SELECT first_seen_at, content_hash FROM article_feed WHERE article_id = :aid AND feed_id = :fid")
@@ -262,6 +261,6 @@ class ArticleWriterIT extends AbstractIntegrationTest {
                 .param("fid", feedId)
                 .query().singleRow();
         assertThat(firstSeenAt(result.id())).isEqualTo(T0);
-        assertThat(linkRow3.get("content_hash")).isEqualTo("hash-b");
+        assertThat(linkRow3).containsEntry("content_hash", "hash-b");
     }
 }

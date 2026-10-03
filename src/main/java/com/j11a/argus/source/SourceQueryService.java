@@ -1,6 +1,5 @@
 package com.j11a.argus.source;
 
-import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.FeedRepository;
 import com.j11a.argus.feed.FeedSummary;
 import com.j11a.argus.web.error.ApiException;

@@ -186,7 +186,7 @@ class ArgusDashboardTest {
     }
 
     @Test
-    void deduplicationRowContainsExpectedPanelsWithExpressions() {
+    void deduplicationRowHoldsTheDecisionAndSkipReasonPanels() {
         JsonNode row = panel(53);
         assertThat(row.path("title").asString()).isEqualTo("Deduplication");
         assertThat(row.path("type").asString()).isEqualTo("row");
@@ -206,7 +206,10 @@ class ArgusDashboardTest {
         assertThat(expr(p54, 0)).isEqualTo(
                 "sum by (reason) (rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\",decision=\"skipped\"}[$__rate_interval]))");
         assertThat(p54.path("fieldConfig").path("defaults").path("unit").asString()).isEqualTo("ops");
+    }
 
+    @Test
+    void deduplicationRowHoldsTheFallbackLockWaitAndUpdatePanels() {
         JsonNode p55 = panel(55);
         assertThat(p55.path("title").asString()).isEqualTo("Link-fallback outcomes");
         assertThat(gridPos(p55)).isEqualTo(new GridPos(0, 61, 8, 8));
@@ -227,7 +230,10 @@ class ArgusDashboardTest {
         assertThat(expr(p57, 0)).isEqualTo(
                 "sum by (reason) (rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\",decision=\"updated\"}[$__rate_interval]))");
         assertThat(p57.path("fieldConfig").path("defaults").path("unit").asString()).isEqualTo("ops");
+    }
 
+    @Test
+    void deduplicationRowHoldsTheDuplicatePressureAndOverlapPanels() {
         JsonNode p58 = panel(58);
         assertThat(p58.path("title").asString()).isEqualTo("Duplicate pressure");
         assertThat(gridPos(p58)).isEqualTo(new GridPos(0, 69, 12, 8));

@@ -16,6 +16,7 @@ public class RekeyArticlesChange implements CustomTaskChange {
     private @Nullable RekeyReport report;
 
     public RekeyArticlesChange() {
+        // Liquibase instantiates custom changes reflectively and needs a public no-arg constructor
     }
 
     @Override
@@ -41,10 +42,12 @@ public class RekeyArticlesChange implements CustomTaskChange {
 
     @Override
     public void setUp() throws SetupException {
+        // no setup needed
     }
 
     @Override
     public void setFileOpener(ResourceAccessor resourceAccessor) {
+        // no resource access needed
     }
 
     @Override

@@ -94,7 +94,7 @@ class SourceQueryServiceTest {
         SourceResponse r2 = content.get(1);
         assertThat(r2.id()).isEqualTo(2L);
         assertThat(r2.key()).isEqualTo("empty.org");
-        assertThat(r2.articleCount()).isEqualTo(0L);
+        assertThat(r2.articleCount()).isZero();
         assertThat(r2.feeds()).isEmpty();
     }
 
@@ -112,7 +112,7 @@ class SourceQueryServiceTest {
 
         SourceResponse res = service.get(1L);
         assertThat(res.id()).isEqualTo(1L);
-        assertThat(res.articleCount()).isEqualTo(0L);
+        assertThat(res.articleCount()).isZero();
 
         assertThatThrownBy(() -> service.get(99L))
                 .isInstanceOfSatisfying(ApiException.class, e -> {

@@ -76,7 +76,7 @@ public class DecisionApplier {
     private Outcome applyDecision(
             long sourceId, long feedId, EntryDecision decision, Instant fetchedAt, OffsetDateTime nowUtc) {
         return switch (decision) {
-            case EntryDecision.Insert i -> applyInsert(sourceId, feedId, i.entry(), fetchedAt, nowUtc);
+            case EntryDecision.Insert(var entry) -> applyInsert(sourceId, feedId, entry, fetchedAt, nowUtc);
             case EntryDecision.Update u -> applyUpdate(feedId, u, nowUtc);
             case EntryDecision.Link l -> applyLink(feedId, l, nowUtc);
             case EntryDecision.Unchanged un -> applyUnchanged(feedId, un, nowUtc);
@@ -161,7 +161,7 @@ public class DecisionApplier {
 
     private static @Nullable String guidKeyOf(EntryDecision decision) {
         return switch (decision) {
-            case EntryDecision.Insert i -> i.entry().guidKey();
+            case EntryDecision.Insert(var entry) -> entry.guidKey();
             case EntryDecision.Update u -> u.entry().guidKey();
             case EntryDecision.Link l -> l.entry().guidKey();
             case EntryDecision.Unchanged un -> un.entry().guidKey();
