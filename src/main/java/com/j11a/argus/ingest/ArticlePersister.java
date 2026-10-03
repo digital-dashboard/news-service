@@ -1,16 +1,16 @@
 package com.j11a.argus.ingest;
 
-import com.j11a.argus.article.ArticleInserter;
-import com.j11a.argus.article.InsertOutcome;
-import com.j11a.argus.article.NewArticle;
 import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.parse.ParsedEntry;
-import com.j11a.argus.ingest.dedup.LinkFallback;
+import com.j11a.argus.ingest.dedup.DedupInput;
+import com.j11a.argus.ingest.dedup.EntryDedupResolver;
+import com.j11a.argus.ingest.dedup.Resolution;
+import com.j11a.argus.source.SourceLock;
+import java.time.Clock;
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,58 +18,44 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class ArticlePersister {
 
-    static final String MISSING_IDENTITY = "missing_identity";
-    private static final Map<LinkFallback, Integer> NO_FALLBACKS = Map.of(
-            LinkFallback.GUID_REPLACED, 0,
-            LinkFallback.GUARDED_HOMEPAGE, 0,
-            LinkFallback.GUARDED_SHARED, 0);
+    private final SourceLock sourceLock;
+    private final ExistingArticleLoader loader;
+    private final EntryDedupResolver resolver;
+    private final DecisionApplier applier;
+    private final IngestTelemetry telemetry;
+    private final JdbcClient jdbc;
+    private final Clock clock;
 
-    private record Keyed(String guidKey, ParsedEntry entry) {
-    }
-
-    private final ArticleInserter inserter;
-
-    public ArticlePersister(ArticleInserter inserter) {
-        this.inserter = inserter;
+    public ArticlePersister(SourceLock sourceLock, ExistingArticleLoader loader, EntryDedupResolver resolver,
+            DecisionApplier applier, IngestTelemetry telemetry, JdbcClient jdbc, Clock clock) {
+        this.sourceLock = sourceLock;
+        this.loader = loader;
+        this.resolver = resolver;
+        this.applier = applier;
+        this.telemetry = telemetry;
+        this.jdbc = jdbc;
+        this.clock = clock;
     }
 
     @Transactional
     public PersistCounts persist(Feed feed, List<ParsedEntry> entries, Instant fetchedAt) {
         long sourceId = feed.getSource().getId();
-        // Ascending key order, so two feeds sharing entries lock rows in the same order and cannot deadlock.
-        List<Keyed> keyed = entries.stream()
-                .flatMap(entry -> Optional.ofNullable(EntryKeys.guidKey(entry.guid(), entry.link()))
-                        .map(key -> new Keyed(key, entry))
-                        .stream())
-                .sorted(Comparator.comparing(Keyed::guidKey))
-                .toList();
-        int inserted = 0;
-        for (Keyed candidate : keyed) {
-            NewArticle article = toArticle(sourceId, candidate.guidKey(), candidate.entry(), fetchedAt);
-            if (inserter.insert(article, feed.getId()) == InsertOutcome.INSERTED) {
-                inserted++;
-            }
-        }
-        int skipped = entries.size() - keyed.size();
-        return new PersistCounts(inserted, Map.of(), 0, keyed.size() - inserted,
-                skipped == 0 ? Map.of() : Map.of(MISSING_IDENTITY, skipped), NO_FALLBACKS);
-    }
+        long feedId = feed.getId();
+        String sourceKey = feed.getSource().getKey();
 
-    private static NewArticle toArticle(long sourceId, String guidKey, ParsedEntry entry, Instant fetchedAt) {
-        return new NewArticle(
-                sourceId,
-                guidKey,
-                entry.guid(),
-                EntryKeys.linkKey(entry.link()),
-                entry.link(),
-                entry.title(),
-                entry.excerpt(),
-                entry.author(),
-                entry.imageUrl(),
-                entry.categories(),
-                entry.publishedAt(),
-                entry.updatedAt(),
-                EffectiveTime.of(entry.publishedAt(), entry.updatedAt(), fetchedAt),
-                fetchedAt);
+        telemetry.lockWait(sourceKey, sourceId, () -> sourceLock.acquire(sourceId));
+
+        String homepageUrl = jdbc.sql("SELECT homepage_url FROM source WHERE id = :id")
+                .param("id", sourceId)
+                .query(String.class)
+                .optional()
+                .orElse(null);
+        String homepageKey = EntryKeys.linkKey(homepageUrl);
+
+        Resolution resolution = telemetry.span("argus.resolve",
+                Map.of("source.id", String.valueOf(sourceId)),
+                () -> resolver.resolve(new DedupInput(feedId, entries, homepageKey, fetchedAt, loader.forFeed(sourceId, feedId))));
+
+        return applier.apply(sourceId, feedId, resolution, fetchedAt, clock.instant());
     }
 }

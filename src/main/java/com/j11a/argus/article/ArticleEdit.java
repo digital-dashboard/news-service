@@ -4,13 +4,10 @@ import java.time.Instant;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
-public record NewArticle(
-        long sourceId,
-        String guidKey,
-        @Nullable String rawGuid,
+public record ArticleEdit(
+        long id,
         @Nullable String linkKey,
         @Nullable String link,
-        String contentHash,
         String title,
         String excerpt,
         @Nullable String author,
@@ -19,5 +16,6 @@ public record NewArticle(
         @Nullable Instant publishedAt,
         @Nullable Instant updatedAtUpstream,
         Instant effectiveAt,
-        Instant fetchedAt) {
+        boolean dated,
+        String contentHash) {
 }
