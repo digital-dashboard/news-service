@@ -34,8 +34,9 @@ class PollingStartupLoggingIT extends AbstractIntegrationTest {
             startupLogger.logPollingSchedule();
 
             assertThat(logs.at(Level.INFO)).singleElement().satisfies(event -> {
-                assertThat(event.getFormattedMessage()).isEqualTo(
-                        "Polling scheduled with cron -, concurrency 2; 2 enabled feeds, 1 failing");
+                assertThat(event.getFormattedMessage())
+                        .contains("concurrency 2")
+                        .contains("2 enabled feeds, 1 failing");
                 assertThat(LogCapture.keyValues(event))
                         .containsEntry("enabledFeeds", 2L)
                         .containsEntry("failingFeeds", 1L)

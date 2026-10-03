@@ -8,7 +8,6 @@ import com.j11a.argus.feed.fetch.RetryingFeedFetcher;
 import com.j11a.argus.feed.parse.FeedParseException;
 import com.j11a.argus.feed.parse.FeedParser;
 import com.j11a.argus.feed.parse.ParsedFeed;
-import com.j11a.argus.url.LogSafe;
 import java.net.URI;
 import java.time.Clock;
 import java.time.Instant;
@@ -127,15 +126,14 @@ public class FeedLoader {
 
     private static final class ParseFailure extends RuntimeException {
         private final String reason;
-        private final FetchError error;
+        private final transient FetchError error;
         private final @Nullable String contentType;
         private final int bodyBytes;
 
         ParseFailure(FeedParseException cause, FetchResult.Fetched fetched) {
             super("Feed could not be parsed: " + cause.reason());
             this.reason = cause.reason().name().toLowerCase(Locale.ROOT);
-            this.error = new FetchError(FeedParseException.class.getSimpleName(),
-                    LogSafe.redactUrls(String.valueOf(cause.getMessage())));
+            this.error = FetchError.ofMessage(FeedParseException.class.getSimpleName(), cause.getMessage());
             this.contentType = fetched.contentType();
             this.bodyBytes = fetched.body().length;
         }

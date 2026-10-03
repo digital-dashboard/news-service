@@ -4,10 +4,10 @@ import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.FeedRepository;
 import com.j11a.argus.feed.fetch.FetchError;
 import com.j11a.argus.feed.fetch.FetchValidators;
+import com.j11a.argus.feed.health.FailingThreshold;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
 import com.j11a.argus.feed.parse.ParsedFeed;
-import com.j11a.argus.feed.poll.PollProperties;
 import com.j11a.argus.observability.LogFields;
 import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.url.HttpUrls;
@@ -40,28 +40,19 @@ public class FeedIngestService {
     private final IngestTelemetry telemetry;
     private final FeedHealthUpdater healthUpdater;
     private final FeedHealthGauges healthGauges;
-    private final PollProperties pollProperties;
+    private final int failingThreshold;
     private final Clock clock;
-
-    /** What went wrong, as far as it is known; contentType and bodyBytes are only set for parse failures. */
-    private record Failure(String reason, @Nullable Integer httpStatus, @Nullable FetchError error,
-                           @Nullable String contentType, @Nullable Integer bodyBytes) {
-
-        static Failure of(Throwable cause, String reason) {
-            return new Failure(reason, null, FetchError.of(cause), null, null);
-        }
-    }
 
     public FeedIngestService(FeedRepository feeds, FeedLoader loader, ArticlePersister persister,
             IngestTelemetry telemetry, FeedHealthUpdater healthUpdater,
-            FeedHealthGauges healthGauges, PollProperties pollProperties, Clock clock) {
+            FeedHealthGauges healthGauges, FailingThreshold failingThreshold, Clock clock) {
         this.feeds = feeds;
         this.loader = loader;
         this.persister = persister;
         this.telemetry = telemetry;
         this.healthUpdater = healthUpdater;
         this.healthGauges = healthGauges;
-        this.pollProperties = pollProperties;
+        this.failingThreshold = failingThreshold.value();
         this.clock = clock;
     }
 
@@ -78,8 +69,7 @@ public class FeedIngestService {
         try {
             loaded = loader.load(URI.create(feed.getUrl()), validators, feed.getSource().getKey());
         } catch (RuntimeException e) {
-            recordFailureUnlessInterrupted(feed, Failure.of(e, FailureReasons.UNEXPECTED_ERROR), now);
-            throw e;
+            throw failedUnexpectedly(feed, FailureReasons.UNEXPECTED_ERROR, e, now);
         }
         if (Thread.currentThread().isInterrupted()) {
             return IngestReport.failed(feed.getId(), FailureReasons.INTERRUPTED);
@@ -92,8 +82,8 @@ public class FeedIngestService {
                 yield IngestReport.notModified(feed.getId());
             }
             case FeedLoader.Loaded.Failed failed -> {
-                recordAndLogFailure(feed, new Failure(failed.reason(), failed.httpStatus(), failed.error(),
-                        failed.contentType(), failed.bodyBytes()), failed.lastError(), now);
+                int consecutiveFailures = healthUpdater.recordFailure(feed.getId(), failed.lastError(), now);
+                logFailure(feed, failed, consecutiveFailures, null);
                 yield IngestReport.failed(feed.getId(), failed.reason());
             }
         };
@@ -106,55 +96,60 @@ public class FeedIngestService {
             logRecovery(feed, healthUpdater.recordSuccess(feed.getId(), validators, now));
             return report;
         } catch (RuntimeException e) {
-            recordFailureUnlessInterrupted(feed, Failure.of(e, FailureReasons.PERSIST_FAILED), now);
-            throw e;
+            throw failedUnexpectedly(feed, FailureReasons.PERSIST_FAILED, e, now);
         }
     }
 
-    // A shutdown interrupt is not the feed's fault, so it must not count against it.
-    private void recordFailureUnlessInterrupted(Feed feed, Failure failure, Instant now) {
-        if (!Thread.currentThread().isInterrupted()) {
-            recordAndLogFailure(feed, failure, failure.reason(), now);
+    /**
+     * Counts the failure against the feed and logs it once, with the stack trace, as an IngestFailedException's
+     * cause; callers must not log it again. A shutdown interrupt, or a feed deleted meanwhile, is not the feed's
+     * fault, so nothing is logged and the original exception goes on.
+     */
+    private RuntimeException failedUnexpectedly(Feed feed, String reason, RuntimeException cause, Instant now) {
+        if (Thread.currentThread().isInterrupted()) {
+            return cause;
         }
+        int consecutiveFailures = healthUpdater.recordFailure(feed.getId(), reason, now);
+        if (consecutiveFailures == 0) {
+            // The feed was deleted meanwhile: not its failure, and the poller reports it as deleted.
+            return cause;
+        }
+        // Only the exception type is logged: persistence errors quote the article row (GUID, link, title).
+        FeedLoader.Loaded.Failed failed = new FeedLoader.Loaded.Failed(
+                reason, null, FetchError.typeOnly(cause), null, null);
+        logFailure(feed, failed, consecutiveFailures, cause);
+        return new IngestFailedException(feed.getId(), reason, cause);
     }
 
-    private void recordAndLogFailure(Feed feed, Failure failure, String lastError, Instant now) {
-        int consecutiveFailures = healthUpdater.recordFailure(feed.getId(), lastError, now);
-        logFailure(feed, failure, consecutiveFailures);
-    }
-
-    private void logFailure(Feed feed, Failure failure, int consecutiveFailures) {
+    private void logFailure(Feed feed, FeedLoader.Loaded.Failed failed, int consecutiveFailures,
+            @Nullable RuntimeException unexpected) {
         String sourceKey = feed.getSource().getKey();
-        int threshold = pollProperties.failingThreshold();
-        String detail = describe(failure.reason(), failure.error());
-        failureFields(log.atWarn(), feed, failure, consecutiveFailures)
+        String detail = describe(failed.reason(), failed.error());
+        failureFields(unexpected != null ? log.atError() : log.atWarn(), feed, failed, consecutiveFailures)
                 .setMessage("Ingest failed for feed " + feed.getId() + " (" + sourceKey + "): " + detail + "; "
                         + consecutiveFailures + " consecutive failures")
+                .setCause(unexpected)
                 .log();
-        if (consecutiveFailures == threshold) {
-            failureFields(log.atError(), feed, failure, consecutiveFailures)
-                    .setMessage("Feed " + feed.getId() + " (" + sourceKey + ") is now failing after "
+        // == fires once per crossing; a recovery followed by a fresh crossing fires again.
+        if (consecutiveFailures == failingThreshold) {
+            failureFields(log.atError(), feed, failed, consecutiveFailures)
+                    .setMessage(feedLabel(feed.getId(), sourceKey) + " is now failing after "
                             + consecutiveFailures + " consecutive failures; last error: " + detail)
                     .log();
         }
     }
 
     // feedId and sourceId are already in the MDC for the whole ingest, so they are not repeated as key-values.
-    private LoggingEventBuilder failureFields(LoggingEventBuilder event, Feed feed, Failure failure,
+    private LoggingEventBuilder failureFields(LoggingEventBuilder event, Feed feed, FeedLoader.Loaded.Failed failed,
             int consecutiveFailures) {
-        FetchError error = failure.error();
         LoggingEventBuilder base = event
                 .addKeyValue(LogKeys.SOURCE_KEY, feed.getSource().getKey())
                 .addKeyValue(LogKeys.URL, HttpUrls.redact(feed.getUrl()))
-                .addKeyValue(LogKeys.REASON, failure.reason())
+                .addKeyValue(LogKeys.REASON, failed.reason())
                 .addKeyValue(LogKeys.CONSECUTIVE_FAILURES, consecutiveFailures)
-                .addKeyValue(LogKeys.FAILING_THRESHOLD, pollProperties.failingThreshold());
-        LogFields.put(base, LogKeys.HTTP_STATUS, failure.httpStatus());
-        LogFields.put(base, LogKeys.ERROR_TYPE, error != null ? error.type() : null);
-        LogFields.put(base, LogKeys.ERROR_MESSAGE, error != null ? error.message() : null);
-        LogFields.put(base, LogKeys.CONTENT_TYPE, failure.contentType());
-        LogFields.put(base, LogKeys.BODY_BYTES, failure.bodyBytes());
-        return base;
+                .addKeyValue(LogKeys.FAILING_THRESHOLD, failingThreshold);
+        LogFields.put(base, LogKeys.HTTP_STATUS, failed.httpStatus());
+        return FetchError.addFields(base, failed.error(), failed.contentType(), failed.bodyBytes());
     }
 
     private static String describe(String reason, @Nullable FetchError error) {
@@ -164,13 +159,17 @@ public class FeedIngestService {
         return reason + " " + error.type() + (error.message() != null ? ": " + error.message() : "");
     }
 
+    private static String feedLabel(long feedId, String sourceKey) {
+        return "Feed " + feedId + " (" + sourceKey + ")";
+    }
+
     private void logRecovery(Feed feed, int previousFailures) {
         if (previousFailures <= 0) {
             return;
         }
         String sourceKey = feed.getSource().getKey();
         log.atInfo()
-                .setMessage("Feed " + feed.getId() + " (" + sourceKey + ") recovered after " + previousFailures
+                .setMessage(feedLabel(feed.getId(), sourceKey) + " recovered after " + previousFailures
                         + " consecutive failures")
                 .addKeyValue(LogKeys.SOURCE_KEY, sourceKey)
                 .addKeyValue(LogKeys.CONSECUTIVE_FAILURES, previousFailures)
@@ -183,8 +182,9 @@ public class FeedIngestService {
     }
 
     private IngestReport ingest(Feed feed, Supplier<IngestReport> work) {
+        String sourceId = String.valueOf(feed.getSource().getId());
         try (MDC.MDCCloseable feedScope = MDC.putCloseable(LogKeys.FEED_ID, String.valueOf(feed.getId()));
-                MDC.MDCCloseable sourceScope = MDC.putCloseable(LogKeys.SOURCE_ID, String.valueOf(feed.getSource().getId()))) {
+                MDC.MDCCloseable sourceScope = MDC.putCloseable(LogKeys.SOURCE_ID, sourceId)) {
             try {
                 long startedNanos = System.nanoTime();
                 IngestReport report = telemetry.ingest(feed, work);
@@ -195,7 +195,8 @@ public class FeedIngestService {
                                 + " skipped=" + report.skipped() + " reason=" + report.failureReason())
                         .addKeyValue(LogKeys.SOURCE_KEY, feed.getSource().getKey())
                         .addKeyValue(LogKeys.URL, HttpUrls.redact(feed.getUrl()))
-                        .addKeyValue(LogKeys.DURATION_MS, Duration.ofNanos(System.nanoTime() - startedNanos).toMillis())
+                        .addKeyValue(LogKeys.DURATION_MS,
+                                Duration.ofNanos(System.nanoTime() - startedNanos).toMillis())
                         .log();
                 return report;
             } finally {

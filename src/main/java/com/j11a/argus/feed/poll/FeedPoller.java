@@ -4,6 +4,7 @@ import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.FeedRepository;
 import com.j11a.argus.ingest.FailureReasons;
 import com.j11a.argus.ingest.FeedIngestService;
+import com.j11a.argus.ingest.IngestFailedException;
 import com.j11a.argus.ingest.IngestReport;
 import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.web.error.ApiException;
@@ -130,6 +131,10 @@ public class FeedPoller {
         }
         if (!feedRepository.existsById(feed.getId())) {
             return deleted(feed);
+        }
+        if (e instanceof IngestFailedException) {
+            // The ingest already logged this failure in full, with its stack trace.
+            return IngestReport.failed(feed.getId(), FailureReasons.UNEXPECTED_ERROR);
         }
         log.atError()
                 .setMessage("Failed to ingest feed " + feed.getId())

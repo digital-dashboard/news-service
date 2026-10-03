@@ -2,6 +2,7 @@ package com.j11a.argus.web.error;
 
 import java.net.URI;
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 
@@ -30,7 +31,12 @@ final class Problems {
     }
 
     static boolean hasCode(ProblemDetail problem) {
+        return codeOf(problem) != null;
+    }
+
+    static @Nullable String codeOf(ProblemDetail problem) {
         Map<String, Object> properties = problem.getProperties();
-        return properties != null && properties.containsKey(CODE_PROPERTY);
+        Object code = properties == null ? null : properties.get(CODE_PROPERTY);
+        return code == null ? null : code.toString();
     }
 }

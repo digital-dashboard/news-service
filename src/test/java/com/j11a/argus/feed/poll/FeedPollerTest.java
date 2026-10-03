@@ -14,6 +14,7 @@ import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.FeedRepository;
 import com.j11a.argus.ingest.FailureReasons;
 import com.j11a.argus.ingest.FeedIngestService;
+import com.j11a.argus.ingest.IngestFailedException;
 import com.j11a.argus.ingest.IngestReport;
 import com.j11a.argus.testsupport.LogCapture;
 import com.j11a.argus.web.error.ApiException;
@@ -116,6 +117,24 @@ class FeedPollerTest {
             assertThat(LogCapture.keyValues(logs.at(Level.ERROR).getFirst()))
                     .containsEntry("feedId", 1L)
                     .containsEntry("reason", FailureReasons.UNEXPECTED_ERROR);
+        }
+    }
+
+    @Test
+    void anIngestFailureThatTheIngestAlreadyLoggedIsReportedButNotLoggedAgain() {
+        enabledFeeds(feed(1L));
+        executorRunsTasksInline();
+        when(feedRepository.existsById(1L)).thenReturn(true);
+        when(ingestService.refresh(1L)).thenThrow(
+                new IngestFailedException(1L, FailureReasons.PERSIST_FAILED, new IllegalStateException("db down")));
+
+        try (LogCapture logs = LogCapture.start()) {
+            AggregatePollReport report = poller.poll(PollTrigger.SCHEDULED);
+
+            assertThat(report.failed()).isOne();
+            assertThat(report.reports().getFirst().failureReason()).isEqualTo(FailureReasons.UNEXPECTED_ERROR);
+            assertThat(logs.at(Level.ERROR, FeedPoller.class)).isEmpty();
+            assertThat(logs.at(Level.WARN, FeedPoller.class)).isEmpty();
         }
     }
 

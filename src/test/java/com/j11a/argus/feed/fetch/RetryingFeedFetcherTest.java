@@ -196,8 +196,7 @@ class RetryingFeedFetcherTest {
         try (LogCapture logs = LogCapture.start()) {
             fetch(retrying(2, Duration.ofMillis(10), LONG_TIMEOUT), DOWN);
 
-            assertThat(logs.at(Level.INFO).stream()
-                    .filter(event -> event.getLoggerName().equals(RetryingFeedFetcher.class.getName())))
+            assertThat(logs.at(Level.INFO, RetryingFeedFetcher.class))
                     .hasSize(2).satisfiesExactly(
                     first -> assertRetryLine(first, 1), second -> assertRetryLine(second, 2));
         }
@@ -211,7 +210,9 @@ class RetryingFeedFetcherTest {
                 .containsEntry("reason", "http_status")
                 .containsEntry("errorType", "HttpStatus");
         assertThat(event.getFormattedMessage())
-                .isEqualTo("Fetch attempt " + attempt + "/3 for test-source failed (http_status HttpStatus), retrying");
+                .contains("attempt " + attempt + "/3")
+                .contains("test-source")
+                .contains("http_status HttpStatus");
     }
 
     @Test

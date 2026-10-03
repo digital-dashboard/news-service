@@ -12,6 +12,7 @@ import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.IngestReport;
 import com.j11a.argus.observability.MetricNames;
 import com.j11a.argus.testsupport.FeedStubServer;
+import com.j11a.argus.testsupport.Fixtures;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -217,8 +218,7 @@ class FeedHealthIT extends AbstractIntegrationTest {
     }
 
     private long healthyFeedId() {
-        stub.serve(PATH, 200, "application/rss+xml",
-                FeedStubServer.utf8("<rss><channel><title>H</title><link>https://health.example.test</link></channel></rss>"));
+        stub.serve(PATH, 200, "application/rss+xml", Fixtures.emptyRss("https://health.example.test"));
         return feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS, null)).id();
     }
 
@@ -258,8 +258,9 @@ class FeedHealthIT extends AbstractIntegrationTest {
         assertThat(before).isOne();
         var row = jdbcClient.sql("SELECT etag, consecutive_failures, last_error FROM feed WHERE id = :id")
                 .param("id", feedId).query().singleRow();
-        assertThat(row).containsEntry("etag", "\"v1\"").containsEntry("consecutive_failures", 0);
-        assertThat(row.get("last_error")).isNull();
+        assertThat(row).containsEntry("etag", "\"v1\"")
+                .containsEntry("consecutive_failures", 0)
+                .containsEntry("last_error", null);
     }
 
     @Test

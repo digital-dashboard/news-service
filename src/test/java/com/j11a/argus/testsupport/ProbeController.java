@@ -1,5 +1,6 @@
 package com.j11a.argus.testsupport;
 
+import com.j11a.argus.ingest.IngestFailedException;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import jakarta.validation.Valid;
@@ -79,6 +80,26 @@ public class ProbeController {
     @GetMapping("/boom")
     public String boom() {
         throw new IllegalStateException(SECRET_DETAIL);
+    }
+
+    @GetMapping("/unavailable")
+    public String unavailable() {
+        throw new ApiException(ErrorCode.SERVICE_UNAVAILABLE, "shutting down");
+    }
+
+    @GetMapping("/ingest-failed")
+    public String ingestFailed() {
+        throw new IngestFailedException(7, "persist_failed", new IllegalStateException(SECRET_DETAIL));
+    }
+
+    @GetMapping("/feed-invalid")
+    public String feedInvalid() {
+        throw new ApiException(ErrorCode.FEED_INVALID, "not a feed");
+    }
+
+    @GetMapping("/feed-conflict")
+    public String feedConflict() {
+        throw new ApiException(ErrorCode.FEED_URL_CONFLICT, "duplicate");
     }
 
     @GetMapping("/rejected")

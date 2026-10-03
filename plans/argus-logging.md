@@ -40,15 +40,14 @@ All structured fields are SLF4J key-values with camelCase names. They are emitte
 | `feedId`, `sourceId` | Already MDC during ingest; added as key-values elsewhere. |
 | `sourceKey` | For example `cbc.ca`. |
 | `url` | Redacted feed URL. |
-| `finalUrl` | Redacted URL after redirects, only when it differs from `url`. |
 | `reason` | The `FetchFailureReason` tag or `FailureReasons` code. |
 | `httpStatus` | Integer status code. |
 | `errorType` | Simple class name of the **root cause**, for example `SSLHandshakeException` or `ConnectException`. |
-| `errorMessage` | Root-cause message, with URLs redacted, at most 300 characters. |
-| `attempt`, `maxAttempts` | Fetch attempts. |
+| `errorMessage` | Root-cause message, with URLs redacted, control characters replaced and at most 300 characters. Not logged for `persist_failed` and `unexpected_error`: their messages can quote article rows. |
+| `attempt`, `maxAttempts` | The fetch attempt that failed and the attempts allowed. Only on the retry INFO lines. |
 | `consecutiveFailures`, `failingThreshold` | Health counters. |
 | `durationMs` | Elapsed time. |
-| `contentType`, `bodyBytes` | Parse failures. |
+| `contentType`, `bodyBytes` | Parse failures. `contentType` is capped at 100 characters. |
 
 Never log any of these:
 - full URLs with query or user-info;
@@ -60,7 +59,9 @@ Never log any of these:
 ### Message text
 Each message is one human sentence that already contains the key facts. It must read well in the plain-text `dev` profile, which does not print key-values. For example:
 
-`Fetch failed for feed 5 (cbc.ca) after 3 attempts: io SSLHandshakeException: Remote host terminated the handshake`
+`Ingest failed for feed 5 (cbc.ca): io SSLHandshakeException: Remote host terminated the handshake; 3 consecutive failures`
+
+A retry INFO line carries the attempt counts: `Fetch attempt 1/3 for cbc.ca failed (io SSLHandshakeException), retrying`.
 
 ### Lombok
 - Add `org.projectlombok:lombok` with `<optional>true</optional>`. The version comes from the Boot BOM.
@@ -95,7 +96,7 @@ Each message is one human sentence that already contains the key facts. It must 
 - `FeedIngestService.refreshLoaded`:
   - After `healthUpdater.recordFailure(...)`, which now returns the new count, log the failure **WARN** with every field in the contract.
   - If the new count equals `properties.failingThreshold()`, also log **ERROR**: `Feed {id} ({sourceKey}) is now failing after {n} consecutive failures; last error: {reason} {errorType}: {errorMessage}`.
-  - The `unexpected_error` and `persist_failed` paths log ERROR with the stack trace, which FeedPoller already partly does. Make sure each failure is logged exactly once with full fields; drop any duplicate lines.
+  - The `unexpected_error` and `persist_failed` paths log one ERROR line with the full fields (without `errorMessage`) and the stack trace, instead of the WARN, and throw `IngestFailedException`. `FeedPoller` and the manual refresh endpoint do not log that failure again. If it also crosses the threshold, the threshold ERROR is logged as well.
 - The existing per-ingest summary line keeps its current text. Add the `sourceKey` and `url` key-values, and `durationMs` if it is cheaply available.
 
 ### 3. Health (`feed/health/FeedHealthUpdater`)
@@ -108,12 +109,14 @@ Each message is one human sentence that already contains the key facts. It must 
   - Create success logs INFO `Feed {id} created: {name} ({sourceKey}, topic {topic}) from {redacted url}`.
   - Create rejected 422 logs WARN with `url`, `reason`, `errorType` and `errorMessage`.
   - Create conflict 409 logs INFO with `url` and `existingFeedId`.
+  - `GlobalExceptionHandler` logs neither of these again (DEBUG at most).
   - Delete logs INFO with `feedId` and the number of articles removed.
   - Enable or disable logs INFO.
 - **`SourceService.patch`** logs INFO with `sourceId`, `sourceKey` and the names of the changed fields, plus their new values. Values are fine here: name, country, and the redacted homepage.
 - **`GlobalExceptionHandler`**:
-  - 5xx keeps ERROR with the stack trace.
-  - 401 `ADMIN_KEY_REQUIRED` logs WARN with method and path. Never log the header.
+  - A genuinely unhandled exception logs ERROR with the stack trace: `Unhandled exception: {method} {path}`.
+  - A handled 5xx (for example a 503 during shutdown) logs WARN without a stack trace: `Request failed: {code} {status} {method} {path}`.
+  - 401 `ADMIN_KEY_REQUIRED` under `/news/v2` logs WARN with method and path, and DEBUG elsewhere. Never log the header.
   - Other 4xx log INFO with `code`, `status`, method and path (no query string).
   - 404 and 405 for paths outside `/news/v2` log DEBUG, to keep scanner noise down.
 

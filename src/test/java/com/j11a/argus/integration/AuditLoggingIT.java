@@ -2,6 +2,8 @@ package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -10,16 +12,21 @@ import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.feed.api.FeedService;
 import com.j11a.argus.feed.api.PatchFeedRequest;
+import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.source.PatchSourceRequest;
 import com.j11a.argus.source.SourceService;
+import com.j11a.argus.testsupport.AdminKeys;
 import com.j11a.argus.testsupport.FeedStubServer;
 import com.j11a.argus.testsupport.Fixtures;
 import com.j11a.argus.testsupport.LogCapture;
 import com.j11a.argus.web.error.ApiException;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.ResultActions;
 
 /** Who changed what: create, delete, enable, disable and the source PATCH leave one audit line each. */
 class AuditLoggingIT extends AbstractIntegrationTest {
@@ -31,14 +38,20 @@ class AuditLoggingIT extends AbstractIntegrationTest {
     private SourceService sourceService;
 
     private static List<ILoggingEvent> from(LogCapture logs, Level level, Class<?> logger) {
-        return logs.at(level).stream().filter(event -> logger.getName().equals(event.getLoggerName())).toList();
+        return logs.at(level, logger);
     }
 
-    private static void assertNoSecret(LogCapture logs) {
-        for (Level level : List.of(Level.DEBUG, Level.INFO, Level.WARN, Level.ERROR)) {
-            logs.at(level).forEach(event -> assertThat(event.getFormattedMessage() + LogCapture.keyValues(event))
-                    .doesNotContain("SECRET-TOKEN"));
-        }
+    private ResultActions postFeed(String url) throws Exception {
+        return mockMvc.perform(post("/news/v2/feeds").header(AdminKeys.HEADER, AdminKeys.VALID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"url\":\"" + url + "\",\"topic\":\"NEWS\"}"));
+    }
+
+    private static List<ILoggingEvent> aboveDebug(LogCapture logs) {
+        return Stream.of(Level.INFO, Level.WARN, Level.ERROR)
+                .flatMap(level -> logs.at(level).stream())
+                .filter(event -> event.getLoggerName().startsWith("com.j11a.argus"))
+                .toList();
     }
 
     @Test
@@ -56,11 +69,11 @@ class AuditLoggingIT extends AbstractIntegrationTest {
                         .containsEntry("url", stub.baseUrl() + PATH)
                         .containsKey("sourceKey");
                 assertThat(event.getFormattedMessage())
-                        .startsWith("Feed " + created.id() + " created: " + created.name())
+                        .contains("Feed " + created.id() + " created: " + created.name())
                         .contains("topic WORLD")
-                        .endsWith("from " + stub.baseUrl() + PATH);
+                        .contains("from " + stub.baseUrl() + PATH);
             });
-            assertNoSecret(logs);
+            logs.assertNothingLogged("SECRET-TOKEN");
         }
     }
 
@@ -79,7 +92,7 @@ class AuditLoggingIT extends AbstractIntegrationTest {
                             .containsEntry("errorType", "FeedParseException")
                             .containsKey("errorMessage")
                             .containsEntry("contentType", "text/html"));
-            assertNoSecret(logs);
+            logs.assertNothingLogged("SECRET-TOKEN");
         }
     }
 
@@ -97,6 +110,35 @@ class AuditLoggingIT extends AbstractIntegrationTest {
                             .containsEntry("errorType", "HttpStatus")
                             .containsEntry("errorMessage", "503 Service Unavailable")
                             .doesNotContainKeys("contentType", "bodyBytes"));
+        }
+    }
+
+    @Test
+    void aRejectedCreateRequestLogsExactlyOneLineAboveDebug() throws Exception {
+        stub.serve(PATH, 200, "text/html", Fixtures.feed("not-a-feed.html"));
+
+        try (LogCapture logs = LogCapture.start()) {
+            postFeed(stub.baseUrl() + PATH).andExpect(status().isUnprocessableContent());
+
+            assertThat(aboveDebug(logs)).singleElement().satisfies(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                assertThat(event.getLoggerName()).isEqualTo(FeedService.class.getName());
+            });
+        }
+    }
+
+    @Test
+    void aConflictingCreateRequestLogsExactlyOneLineAboveDebug() throws Exception {
+        stub.serveFixture(PATH, "bbc-like-rss2.xml");
+        feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS, null));
+
+        try (LogCapture logs = LogCapture.start()) {
+            postFeed(stub.baseUrl() + PATH).andExpect(status().isConflict());
+
+            assertThat(aboveDebug(logs)).singleElement().satisfies(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.INFO);
+                assertThat(event.getLoggerName()).isEqualTo(FeedService.class.getName());
+            });
         }
     }
 
@@ -128,12 +170,12 @@ class AuditLoggingIT extends AbstractIntegrationTest {
 
             assertThat(from(logs, Level.INFO, FeedService.class)).satisfiesExactly(
                     disabled -> {
-                        assertThat(disabled.getFormattedMessage()).isEqualTo("Feed " + id + " disabled");
+                        assertThat(disabled.getFormattedMessage()).contains("Feed " + id).contains("disabled");
                         assertThat(LogCapture.keyValues(disabled))
                                 .containsEntry("feedId", id).containsEntry("enabled", false);
                     },
                     enabled -> {
-                        assertThat(enabled.getFormattedMessage()).isEqualTo("Feed " + id + " enabled");
+                        assertThat(enabled.getFormattedMessage()).contains("Feed " + id).contains("enabled");
                         assertThat(LogCapture.keyValues(enabled)).containsEntry("enabled", true);
                     });
         }
@@ -155,7 +197,8 @@ class AuditLoggingIT extends AbstractIntegrationTest {
                         .containsEntry("articlesRemoved", (int) articles)
                         .containsKey("sourceId");
                 assertThat(event.getFormattedMessage())
-                        .isEqualTo("Feed " + id + " deleted along with " + articles + " articles");
+                        .contains("Feed " + id + " deleted")
+                        .contains(articles + " articles");
             });
         }
     }
@@ -174,13 +217,13 @@ class AuditLoggingIT extends AbstractIntegrationTest {
                 assertThat(fields)
                         .containsEntry("sourceId", sourceId)
                         .containsEntry("changedFields", List.of("name", "homepage", "country"))
-                        .containsEntry("newName", "Renamed")
-                        .containsEntry("newHomepage", "https://home.example.test/x")
-                        .containsEntry("newCountry", "CA")
+                        .containsEntry(LogKeys.NEW_NAME, "Renamed")
+                        .containsEntry(LogKeys.NEW_HOMEPAGE, "https://home.example.test/x")
+                        .containsEntry(LogKeys.NEW_COUNTRY, "CA")
                         .containsKey("sourceKey");
                 assertThat(event.getFormattedMessage()).contains("updated").contains("name=Renamed");
             });
-            assertNoSecret(logs);
+            logs.assertNothingLogged("SECRET-TOKEN");
         }
     }
 
@@ -196,7 +239,7 @@ class AuditLoggingIT extends AbstractIntegrationTest {
             assertThat(from(logs, Level.INFO, SourceService.class)).singleElement().satisfies(event ->
                     assertThat(LogCapture.keyValues(event))
                             .containsEntry("changedFields", List.of("country"))
-                            .doesNotContainKeys("newName", "newHomepage"));
+                            .doesNotContainKeys(LogKeys.NEW_NAME, LogKeys.NEW_HOMEPAGE));
         }
     }
 }

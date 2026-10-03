@@ -21,15 +21,13 @@ class FailureLoggingIT extends AbstractIntegrationTest {
 
     private static final String PATH = "/failing/feed.xml";
     private static final String TOKEN_QUERY = "?token=SECRET-TOKEN";
-    private static final String INGEST_LOGGER = FeedIngestService.class.getName();
-    private static final String EMPTY_FEED =
-            "<rss><channel><title>F</title><link>https://failing.example.test</link></channel></rss>";
+    private static final byte[] EMPTY_FEED = Fixtures.emptyRss("https://failing.example.test");
 
     @Autowired
     private FeedIngestService ingestService;
 
     private long createHealthyFeed() {
-        stub.serve(PATH, 200, "application/rss+xml", FeedStubServer.utf8(EMPTY_FEED), Map.of("ETag", "\"v1\""));
+        stub.serve(PATH, 200, "application/rss+xml", EMPTY_FEED, Map.of("ETag", "\"v1\""));
         return feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH + TOKEN_QUERY, null, Topic.NEWS, null))
                 .id();
     }
@@ -44,7 +42,7 @@ class FailureLoggingIT extends AbstractIntegrationTest {
     }
 
     private static List<ILoggingEvent> fromIngest(LogCapture logs, Level level) {
-        return logs.at(level).stream().filter(event -> INGEST_LOGGER.equals(event.getLoggerName())).toList();
+        return logs.at(level, FeedIngestService.class);
     }
 
     @Test
@@ -73,7 +71,7 @@ class FailureLoggingIT extends AbstractIntegrationTest {
                         .contains("http_status HttpStatus: 503 Service Unavailable");
             });
             assertThat(fromIngest(logs, Level.ERROR)).isEmpty();
-            assertNothingLogged(logs, "SECRET-TOKEN");
+            logs.assertNothingLogged("SECRET-TOKEN");
         }
     }
 
@@ -103,7 +101,7 @@ class FailureLoggingIT extends AbstractIntegrationTest {
             ingestService.refresh(feedId);
             assertThat(fromIngest(logs, Level.ERROR)).hasSize(1);
             assertThat(fromIngest(logs, Level.WARN)).hasSize(4);
-            assertNothingLogged(logs, "SECRET-TOKEN");
+            logs.assertNothingLogged("SECRET-TOKEN");
         }
     }
 
@@ -113,7 +111,7 @@ class FailureLoggingIT extends AbstractIntegrationTest {
         failWith503();
         ingestService.refresh(feedId);
         ingestService.refresh(feedId);
-        stub.serve(PATH, 200, "application/rss+xml", FeedStubServer.utf8(EMPTY_FEED));
+        stub.serve(PATH, 200, "application/rss+xml", EMPTY_FEED);
 
         try (LogCapture logs = LogCapture.start()) {
             ingestService.refresh(feedId);
@@ -123,8 +121,8 @@ class FailureLoggingIT extends AbstractIntegrationTest {
                     .filter(event -> event.getFormattedMessage().contains("recovered"))).singleElement()
                     .satisfies(event -> {
                         assertThat(event.getFormattedMessage())
-                                .isEqualTo("Feed " + feedId + " (" + sourceKey(feedId)
-                                        + ") recovered after 2 consecutive failures");
+                                .contains("Feed " + feedId + " (" + sourceKey(feedId) + ")")
+                                .contains("recovered after 2 consecutive failures");
                         assertThat(LogCapture.keyValues(event)).containsEntry("consecutiveFailures", 2);
                     });
         }
@@ -196,14 +194,7 @@ class FailureLoggingIT extends AbstractIntegrationTest {
                             .containsEntry("reason", "io")
                             .containsEntry("errorType", "ConnectException")
                             .containsEntry("url", deadBase + PATH));
-            assertNothingLogged(logs, "SECRET-TOKEN");
-        }
-    }
-
-    private static void assertNothingLogged(LogCapture logs, String secret) {
-        for (Level level : List.of(Level.TRACE, Level.DEBUG, Level.INFO, Level.WARN, Level.ERROR)) {
-            logs.at(level).forEach(event -> assertThat(event.getFormattedMessage() + LogCapture.keyValues(event)
-                    + event.getMDCPropertyMap()).doesNotContain(secret));
+            logs.assertNothingLogged("SECRET-TOKEN");
         }
     }
 }

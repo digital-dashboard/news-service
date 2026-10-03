@@ -9,6 +9,7 @@ import com.j11a.argus.feed.poll.FeedPoller;
 import com.j11a.argus.feed.poll.PollTrigger;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.testsupport.FeedStubServer;
+import com.j11a.argus.testsupport.Fixtures;
 import com.j11a.argus.testsupport.ProbeController;
 import java.util.Arrays;
 import java.util.List;
@@ -37,8 +38,7 @@ class JsonLoggingIT extends AbstractIntegrationTest {
     private FeedPoller poller;
 
     private long createThenBreakFeed() {
-        stub.serve(FEED_PATH, 200, "application/rss+xml",
-                FeedStubServer.utf8("<rss><channel><title>J</title><link>https://json.example.test</link></channel></rss>"));
+        stub.serve(FEED_PATH, 200, "application/rss+xml", Fixtures.emptyRss("https://json.example.test"));
         long feedId = feedService.create(new CreateFeedRequest(stub.baseUrl() + FEED_PATH, null, Topic.NEWS, null)).id();
         stub.serve(FEED_PATH, 503, "text/plain", FeedStubServer.utf8("busy"));
         return feedId;

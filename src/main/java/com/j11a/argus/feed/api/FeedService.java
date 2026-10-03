@@ -21,6 +21,7 @@ import com.j11a.argus.source.SourceLock;
 import com.j11a.argus.source.SourceResolver;
 import com.j11a.argus.source.SourceService;
 import com.j11a.argus.url.HttpUrls;
+import com.j11a.argus.url.LogSafe;
 import com.j11a.argus.url.StoredUrls;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
@@ -154,7 +155,7 @@ public class FeedService {
         }
         healthGauges.refreshAfterCommit();
         log.atInfo()
-                .setMessage("Feed " + id + (request.enabled() ? " enabled" : " disabled"))
+                .setMessage(feedText(id, request.enabled() ? "enabled" : "disabled"))
                 .addKeyValue(LogKeys.FEED_ID, id)
                 .addKeyValue(LogKeys.ENABLED, request.enabled())
                 .log();
@@ -178,7 +179,7 @@ public class FeedService {
         }
         healthGauges.refreshAfterCommit();
         log.atInfo()
-                .setMessage("Feed " + id + " deleted along with " + removedArticles + " articles")
+                .setMessage(feedText(id, "deleted along with " + removedArticles + " articles"))
                 .addKeyValue(LogKeys.FEED_ID, id)
                 .addKeyValue(LogKeys.SOURCE_ID, sourceId)
                 .addKeyValue(LogKeys.ARTICLES_REMOVED, removedArticles)
@@ -194,7 +195,11 @@ public class FeedService {
     }
 
     private static ApiException notFound(long id) {
-        return new ApiException(ErrorCode.FEED_NOT_FOUND, "Feed " + id + " does not exist.");
+        return new ApiException(ErrorCode.FEED_NOT_FOUND, feedText(id, "does not exist."));
+    }
+
+    private static String feedText(long id, String what) {
+        return "Feed " + id + " " + what;
     }
 
     private FeedLoader.CreateLoaded.Created download(URI uri, IngestTelemetry.CreateFetchTimer timer) {
@@ -212,19 +217,15 @@ public class FeedService {
                 .setMessage("Feed creation rejected for " + url + ": " + detail)
                 .addKeyValue(LogKeys.URL, url)
                 .addKeyValue(LogKeys.REASON, failed.reason());
-        LogFields.put(event, LogKeys.ERROR_TYPE, error != null ? error.type() : null);
-        LogFields.put(event, LogKeys.ERROR_MESSAGE, error != null ? error.message() : null);
-        LogFields.put(event, LogKeys.CONTENT_TYPE, failed.contentType());
-        LogFields.put(event, LogKeys.BODY_BYTES, failed.bodyBytes());
-        event.log();
+        FetchError.addFields(event, error, failed.contentType(), failed.bodyBytes()).log();
         return new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", failed.reason()));
     }
 
     private void logCreated(Feed feed, Source source) {
         String url = HttpUrls.redact(feed.getUrl());
         log.atInfo()
-                .setMessage("Feed " + feed.getId() + " created: " + feed.getName() + " (" + source.getKey()
-                        + ", topic " + feed.getTopic() + ") from " + url)
+                .setMessage(feedText(feed.getId(), "created: " + LogSafe.sanitize(feed.getName(), MAX_NAME_LENGTH)
+                        + " (" + source.getKey() + ", topic " + feed.getTopic() + ") from " + url))
                 .addKeyValue(LogKeys.FEED_ID, feed.getId())
                 .addKeyValue(LogKeys.SOURCE_ID, source.getId())
                 .addKeyValue(LogKeys.SOURCE_KEY, source.getKey())

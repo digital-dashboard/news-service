@@ -86,4 +86,49 @@ class LogSafeTest {
 
         assertThat(LogSafe.errorMessage(error)).isEqualTo("self");
     }
+
+    @Test
+    void redactUrlsMatchesTheSchemeCaseInsensitively() {
+        assertThat(LogSafe.redactUrls("GET HTTP://h.test/p?k=SECRET and Https://h.test/q?k=SECRET2 failed"))
+                .isEqualTo("GET HTTP://h.test/p and Https://h.test/q failed");
+    }
+
+    @Test
+    void redactUrlsKeepsTheClosingPunctuationAroundTheUrl() {
+        assertThat(LogSafe.redactUrls("url=\"https://h.test/p?k=SECRET\": refused (see https://h.test/q?k=SECRET)"))
+                .isEqualTo("url=\"https://h.test/p\": refused (see https://h.test/q)");
+    }
+
+    @Test
+    void redactUrlsDropsTheRestOfAQueryThatContainedASpace() {
+        String redacted = LogSafe.redactUrls("GET https://h/p?k=ab cd=SECRET ef=MORE failed");
+
+        assertThat(redacted).isEqualTo("GET https://h/p failed").doesNotContain("SECRET").doesNotContain("MORE");
+    }
+
+    @Test
+    void redactUrlsRemovesUserInfoAndQueryFromAnAddressWithoutAScheme() {
+        assertThat(LogSafe.redactUrls("proxy user:pw@host.test:8080/p?x=y refused"))
+                .isEqualTo("proxy host.test:8080/p refused");
+    }
+
+    @Test
+    void redactUrlsLeavesAnEmailLikeTokenWithoutAColonAlone() {
+        assertThat(LogSafe.redactUrls("contact ops@host.test")).isEqualTo("contact ops@host.test");
+    }
+
+    @Test
+    void errorMessageReplacesControlCharactersWithSpaces() {
+        assertThat(LogSafe.errorMessage(new IOException("line one\nline\ttwo\r"))).isEqualTo("line one line two");
+    }
+
+    @Test
+    void aTwoNodeCauseCycleDoesNotLoopForever() {
+        Exception first = new Exception("first");
+        Exception second = new Exception("second", first);
+        first.initCause(second);
+
+        assertThat(LogSafe.errorType(first)).isEqualTo("Exception");
+        assertThat(LogSafe.errorMessage(first)).isIn("first", "second");
+    }
 }

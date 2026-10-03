@@ -29,6 +29,9 @@ public final class LogKeys {
     public static final String ENABLED = "enabled";
     public static final String ARTICLES_REMOVED = "articlesRemoved";
     public static final String CHANGED_FIELDS = "changedFields";
+    public static final String NEW_NAME = "newName";
+    public static final String NEW_HOMEPAGE = "newHomepage";
+    public static final String NEW_COUNTRY = "newCountry";
     public static final String CRON = "cron";
     public static final String CONCURRENCY = "concurrency";
     public static final String ENABLED_FEEDS = "enabledFeeds";

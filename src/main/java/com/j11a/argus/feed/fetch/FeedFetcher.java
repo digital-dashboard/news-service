@@ -212,7 +212,8 @@ public class FeedFetcher {
 
     private static FetchError httpError(int code) {
         HttpStatus known = HttpStatus.resolve(code);
-        return new FetchError(HTTP_STATUS_ERROR, known == null ? String.valueOf(code) : code + " " + known.getReasonPhrase());
+        String detail = known == null ? String.valueOf(code) : code + " " + known.getReasonPhrase();
+        return new FetchError(HTTP_STATUS_ERROR, detail);
     }
 
     private static Failed httpFailure(int code) {
