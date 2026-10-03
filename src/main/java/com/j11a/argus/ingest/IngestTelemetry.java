@@ -89,6 +89,7 @@ public class IngestTelemetry {
                         .record(fetched.body().length);
                 finishFetch(observation, FETCHED, NO_REASON);
             }
+            case FetchResult.NotModified ignored -> finishFetch(observation, "not_modified", NO_REASON);
             case FetchResult.Failed failed -> finishFetch(observation, FAILED, failed.reason().tag());
         }
         return result;

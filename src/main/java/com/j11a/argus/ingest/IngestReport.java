@@ -11,7 +11,11 @@ public record IngestReport(
         int unchanged,
         int skipped) {
 
-    public enum Outcome { COMPLETED, FAILED }
+    public enum Outcome { COMPLETED, NOT_MODIFIED, FAILED }
+
+    static IngestReport notModified(long feedId) {
+        return new IngestReport(feedId, Outcome.NOT_MODIFIED, null, 0, 0, 0, 0);
+    }
 
     static IngestReport failed(long feedId, String reason) {
         return new IngestReport(feedId, Outcome.FAILED, reason, 0, 0, 0, 0);

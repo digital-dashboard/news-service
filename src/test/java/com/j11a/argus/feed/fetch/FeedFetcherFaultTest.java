@@ -23,7 +23,7 @@ class FeedFetcherFaultTest {
 
     private static FetchResult fetchThrough(ClientHttpRequestFactory factory) {
         FeedFetcher fetcher = new FeedFetcher(RestClient.builder().requestFactory(factory),
-                new FetchProperties("Argus-Test/1.0", DataSize.ofKilobytes(1), 5));
+                new FetchProperties("Argus-Test/1.0", DataSize.ofKilobytes(1), 5, FetchProperties.DEFAULT_RETRY));
         return fetcher.fetch(FEED);
     }
 

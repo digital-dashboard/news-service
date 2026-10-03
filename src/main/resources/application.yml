@@ -52,6 +52,15 @@ argus:
     user-agent: ${ARGUS_FETCH_USER_AGENT:Argus/0.1 (self-hosted RSS aggregator)}
     max-body-size: ${ARGUS_FETCH_MAX_BODY_SIZE:5MB}
     max-redirects: ${ARGUS_FETCH_MAX_REDIRECTS:5}
+    retry:
+      max-retries: ${ARGUS_FETCH_RETRY_MAX_RETRIES:2}
+      delay: ${ARGUS_FETCH_RETRY_DELAY:1s}
+      multiplier: ${ARGUS_FETCH_RETRY_MULTIPLIER:2.0}
+      timeout: ${ARGUS_FETCH_RETRY_TIMEOUT:25s}
+  poll:
+    cron: ${ARGUS_POLL_CRON:0 */15 * * * *}
+    concurrency: ${ARGUS_POLL_CONCURRENCY:8}
+    failing-threshold: ${ARGUS_POLL_FAILING_THRESHOLD:3}
   telemetry:
     otlp-base-url: ${ARGUS_OTLP_BASE_URL:http://tempo:4318}
     sampling-probability: ${ARGUS_TRACING_SAMPLING_PROBABILITY:1.0}

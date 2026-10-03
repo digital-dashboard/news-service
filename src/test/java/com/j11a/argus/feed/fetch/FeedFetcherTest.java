@@ -47,7 +47,7 @@ class FeedFetcherTest {
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
         factory.setReadTimeout(READ_TIMEOUT);
         return new FeedFetcher(RestClient.builder().requestFactory(factory),
-                new FetchProperties(USER_AGENT, MAX_BODY, maxRedirects));
+                new FetchProperties(USER_AGENT, MAX_BODY, maxRedirects, FetchProperties.DEFAULT_RETRY));
     }
 
     private FetchResult fetch(String path) {
@@ -69,7 +69,56 @@ class FeedFetcherTest {
             assertThat(fetched.contentType()).isEqualTo(RSS);
             assertThat(fetched.finalUrl()).isEqualTo(URI.create(server.baseUrl() + "/feed"));
             assertThat(fetched.permanentTarget()).isNull();
+            assertThat(fetched.validators()).isEqualTo(FetchValidators.EMPTY);
         });
+    }
+
+    @Test
+    void capturesValidatorsFromResponseHeadersOn200() {
+        server.serve("/feed", 200, RSS, FeedStubServer.utf8("<rss/>"),
+                Map.of("ETag", "\"abc\"", "Last-Modified", "Wed, 21 Oct 2026 07:28:00 GMT"));
+
+        FetchResult result = fetch("/feed");
+
+        assertThat(result).isInstanceOfSatisfying(Fetched.class, fetched -> {
+            assertThat(fetched.validators().etag()).isEqualTo("\"abc\"");
+            assertThat(fetched.validators().lastModified()).isEqualTo("Wed, 21 Oct 2026 07:28:00 GMT");
+        });
+    }
+
+    @Test
+    void status304ReturnsNotModifiedWithValidators() {
+        server.serve("/feed", 304, null, new byte[0],
+                Map.of("ETag", "\"etag-304\"", "Last-Modified", "Thu, 22 Oct 2026 08:00:00 GMT"));
+
+        FetchResult result = fetcher(5).fetch(URI.create(server.baseUrl() + "/feed"),
+                new FetchValidators("\"etag-304\"", "Thu, 22 Oct 2026 08:00:00 GMT"));
+
+        assertThat(result).isInstanceOfSatisfying(FetchResult.NotModified.class, notModified -> {
+            assertThat(notModified.finalUrl()).isEqualTo(URI.create(server.baseUrl() + "/feed"));
+            assertThat(notModified.permanentTarget()).isNull();
+            assertThat(notModified.validators().etag()).isEqualTo("\"etag-304\"");
+            assertThat(notModified.validators().lastModified()).isEqualTo("Thu, 22 Oct 2026 08:00:00 GMT");
+        });
+    }
+
+    @Test
+    void sendsConditionalHeadersOnFirstHopOnly() {
+        server.redirect("/old", 302, "/new")
+                .serve("/new", 200, RSS, FeedStubServer.utf8("<rss/>"));
+
+        fetcher(5).fetch(URI.create(server.baseUrl() + "/old"),
+                new FetchValidators("\"old-etag\"", "Tue, 20 Oct 2026 00:00:00 GMT"));
+
+        FeedStubServer.Request firstHop = server.requestsTo("/old").get(0);
+        assertThat(firstHop.header("If-None-Match")).isEqualTo("\"old-etag\"");
+        assertThat(firstHop.header("If-Modified-Since")).isEqualTo("Tue, 20 Oct 2026 00:00:00 GMT");
+        assertThat(firstHop.header("User-Agent")).isEqualTo(USER_AGENT);
+
+        FeedStubServer.Request secondHop = server.requestsTo("/new").get(0);
+        assertThat(secondHop.header("If-None-Match")).isNull();
+        assertThat(secondHop.header("If-Modified-Since")).isNull();
+        assertThat(secondHop.header("User-Agent")).isEqualTo(USER_AGENT);
     }
 
     @Test

@@ -22,6 +22,9 @@ public class FeedLoader {
         record Parsed(ParsedFeed feed, Instant fetchedAt) implements Loaded {
         }
 
+        record NotModified(FetchResult.NotModified notModified) implements Loaded {
+        }
+
         /** reason is the lowercase fetch or parse reason tag. */
         record Failed(String reason) implements Loaded {
         }
@@ -42,6 +45,7 @@ public class FeedLoader {
     public Loaded load(URI url, String sourceKey) {
         return switch (telemetry.fetch(sourceKey, () -> fetcher.fetch(url))) {
             case FetchResult.Failed failed -> new Loaded.Failed(failed.reason().tag());
+            case FetchResult.NotModified notModified -> new Loaded.NotModified(notModified);
             case FetchResult.Fetched fetched -> parseFetched(fetched, clock.instant());
         };
     }

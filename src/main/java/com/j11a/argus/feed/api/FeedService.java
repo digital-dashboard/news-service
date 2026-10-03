@@ -87,6 +87,8 @@ public class FeedService {
         // site-link key that refreshes use.
         return switch (loader.load(uri, SourceResolver.keyFor(null, uri))) {
             case FeedLoader.Loaded.Parsed parsed -> parsed;
+            case FeedLoader.Loaded.NotModified ignored ->
+                    throw new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", "not_modified"));
             case FeedLoader.Loaded.Failed(var reason) ->
                     throw new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", reason));
         };

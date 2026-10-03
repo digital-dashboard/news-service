@@ -43,6 +43,7 @@ public class FeedIngestService {
             FeedLoader.Loaded loaded = loader.load(URI.create(feed.getUrl()), feed.getSource().getKey());
             return switch (loaded) {
                 case FeedLoader.Loaded.Parsed(var parsedFeed, var fetchedAt) -> persist(feed, parsedFeed, fetchedAt);
+                case FeedLoader.Loaded.NotModified ignored -> IngestReport.notModified(feed.getId());
                 case FeedLoader.Loaded.Failed(var reason) -> IngestReport.failed(feed.getId(), reason);
             };
         });
