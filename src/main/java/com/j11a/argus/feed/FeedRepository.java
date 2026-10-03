@@ -1,5 +1,6 @@
 package com.j11a.argus.feed;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -18,4 +19,6 @@ public interface FeedRepository extends JpaRepository<Feed, Long> {
     @Override
     @EntityGraph(attributePaths = "source")
     Page<Feed> findAll(Pageable pageable);
+
+    List<Feed> findBySourceIdInOrderByIdAsc(Collection<Long> sourceIds);
 }

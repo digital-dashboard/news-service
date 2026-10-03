@@ -87,11 +87,18 @@ public class FeedService {
         inserter.findIdByUrl(url).ifPresent(existingId -> {
             throw conflict(Optional.of(existingId));
         });
+        Source explicitSource = request.sourceId() != null
+                ? sources.findById(request.sourceId())
+                        .orElseThrow(() -> new ApiException(
+                                ErrorCode.SOURCE_NOT_FOUND, "Source " + request.sourceId() + " does not exist."))
+                : null;
         URI uri = URI.create(url);
         IngestTelemetry.CreateFetchTimer timer = loader.startCreateFetch();
         FeedLoader.CreateLoaded.Created loaded = download(uri, timer);
         ParsedFeed parsed = loaded.feed();
-        Source source = sources.findOrCreate(SourceResolver.keyFor(parsed.siteLink(), uri), parsed.siteLink());
+        Source source = explicitSource != null
+                ? explicitSource
+                : sources.findOrCreate(SourceResolver.keyFor(parsed.siteLink(), uri), parsed.siteLink());
         timer.completed(source.getKey(), loaded.bodyLength());
         long id = inserter.insert(new NewFeed(source.getId(), nameFor(request, parsed, source), url,
                         StoredUrls.clean(parsed.siteLink()), request.topic(), languageOf(parsed)))
