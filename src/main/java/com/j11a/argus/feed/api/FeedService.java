@@ -14,6 +14,7 @@ import com.j11a.argus.ingest.FeedLoader;
 import com.j11a.argus.ingest.IngestTelemetry;
 import com.j11a.argus.security.AdminAccess;
 import com.j11a.argus.source.Source;
+import com.j11a.argus.source.SourceLock;
 import com.j11a.argus.source.SourceResolver;
 import com.j11a.argus.source.SourceService;
 import com.j11a.argus.url.StoredUrls;
@@ -59,10 +60,12 @@ public class FeedService {
     private final PollProperties properties;
     private final JdbcClient jdbc;
     private final Clock clock;
+    private final SourceLock sourceLock;
 
     public FeedService(FeedRepository feeds, FeedInserter inserter, SourceService sources, FeedLoader loader,
             FeedIngestService ingest, FeedHealthUpdater healthUpdater,
-            FeedHealthGauges healthGauges, PollProperties properties, JdbcClient jdbc, Clock clock) {
+            FeedHealthGauges healthGauges, PollProperties properties, JdbcClient jdbc, Clock clock,
+            SourceLock sourceLock) {
         this.feeds = feeds;
         this.inserter = inserter;
         this.sources = sources;
@@ -73,6 +76,7 @@ public class FeedService {
         this.properties = properties;
         this.jdbc = jdbc;
         this.clock = clock;
+        this.sourceLock = sourceLock;
     }
 
     /**
@@ -145,6 +149,12 @@ public class FeedService {
     /** Removes the feed and the articles only it linked to, in one transaction. The source row is kept. */
     @Transactional
     public void delete(long id) {
+        Long sourceId = jdbc.sql("SELECT source_id FROM feed WHERE id = :id")
+                .param("id", id)
+                .query(Long.class)
+                .optional()
+                .orElseThrow(() -> notFound(id));
+        sourceLock.acquire(sourceId);
         jdbc.sql(DELETE_OWNED_ARTICLES).param("feedId", id).update();
         int deleted = jdbc.sql("DELETE FROM feed WHERE id = :id").param("id", id).update();
         if (deleted == 0) {

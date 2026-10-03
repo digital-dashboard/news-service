@@ -9,6 +9,7 @@ import static com.j11a.argus.observability.MetricNames.Tags.SOURCE;
 import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.fetch.FetchResult;
 import com.j11a.argus.feed.parse.ParsedEntry;
+import com.j11a.argus.ingest.dedup.LinkFallback;
 import com.j11a.argus.observability.MetricNames;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -17,6 +18,7 @@ import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
@@ -156,8 +158,34 @@ public class IngestTelemetry {
         observation.stop();
     }
 
+    Duration lockWait(String sourceKey, long sourceId, Supplier<Duration> acquire) {
+        Span span = tracer.nextSpan().name("argus.lock.wait")
+                .tag("source.id", String.valueOf(sourceId))
+                .start();
+        try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
+            Duration wait = acquire.get();
+            span.tag("contended", String.valueOf(!wait.isZero()));
+            Timer.builder(MetricNames.INGEST_LOCK_WAIT)
+                    .tag(SOURCE, sourceKey)
+                    .register(meters)
+                    .record(wait);
+            return wait;
+        } catch (RuntimeException e) {
+            span.error(e);
+            throw e;
+        } finally {
+            span.end();
+        }
+    }
+
     <T> T span(String name, Supplier<T> work) {
-        Span span = tracer.nextSpan().name(name).start();
+        return span(name, Map.of(), work);
+    }
+
+    <T> T span(String name, Map<String, String> attributes, Supplier<T> work) {
+        Span span = tracer.nextSpan().name(name);
+        attributes.forEach(span::tag);
+        span.start();
         try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
             return work.get();
         } catch (RuntimeException e) {
@@ -197,6 +225,14 @@ public class IngestTelemetry {
     private void countDecision(String sourceKey, String decision, String reason, int count) {
         if (count > 0) {
             meters.counter(MetricNames.INGEST_ENTRIES, SOURCE, sourceKey, DECISION, decision, REASON, reason)
+                    .increment(count);
+        }
+    }
+
+    void recordLinkFallbacks(String sourceKey, Map<LinkFallback, Integer> fallbacks) {
+        for (LinkFallback fallback : LinkFallback.values()) {
+            int count = fallbacks.getOrDefault(fallback, 0);
+            meters.counter(MetricNames.INGEST_LINK_FALLBACK, SOURCE, sourceKey, OUTCOME, fallback.tag())
                     .increment(count);
         }
     }

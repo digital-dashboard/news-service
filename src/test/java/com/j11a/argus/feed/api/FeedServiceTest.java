@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -29,6 +30,7 @@ import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.FeedLoader;
 import com.j11a.argus.ingest.IngestTelemetry;
 import com.j11a.argus.source.Source;
+import com.j11a.argus.source.SourceLock;
 import com.j11a.argus.source.SourceService;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
@@ -40,6 +42,7 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -62,8 +65,9 @@ class FeedServiceTest {
     private final JdbcClient jdbc = mock(JdbcClient.class);
     private final IngestTelemetry.CreateFetchTimer timer = mock(IngestTelemetry.CreateFetchTimer.class);
     private final Clock clock = Clock.fixed(FETCHED_AT, ZoneOffset.UTC);
+    private final SourceLock sourceLock = mock(SourceLock.class);
     private final FeedService service = new FeedService(feeds, inserter, sources, loader, ingest,
-            healthUpdater, healthGauges, properties, jdbc, clock);
+            healthUpdater, healthGauges, properties, jdbc, clock, sourceLock);
 
     @BeforeEach
     void stubSource() {
@@ -320,23 +324,34 @@ class FeedServiceTest {
     }
 
     @Test
-    void deleteRemovesOwnedArticlesThenTheFeedAndRefreshesGaugesAfterCommit() {
+    void deleteLocksTheSourceThenRemovesOwnedArticlesAndTheFeedAndRefreshesGaugesAfterCommit() {
         JdbcClient.StatementSpec statement = statementUpdating(1);
+        stubSourceIdLookup(statement, Optional.of(4L));
 
         service.delete(9L);
 
-        verify(jdbc).sql(contains("DELETE FROM article a USING article_feed mine"));
-        verify(jdbc).sql("DELETE FROM feed WHERE id = :id");
+        InOrder order = inOrder(sourceLock, jdbc);
+        order.verify(sourceLock).acquire(4L);
+        order.verify(jdbc).sql(contains("DELETE FROM article a USING article_feed mine"));
+        order.verify(jdbc).sql("DELETE FROM feed WHERE id = :id");
         verify(statement).param("feedId", 9L);
         verify(healthGauges).refreshAfterCommit();
     }
 
     @Test
-    void deleteOfUnknownFeedThrowsNotFoundWithoutRefreshingGauges() {
-        statementUpdating(0);
+    void deleteOfUnknownFeedThrowsNotFoundWithoutLockingOrRefreshingGauges() {
+        JdbcClient.StatementSpec statement = statementUpdating(0);
+        stubSourceIdLookup(statement, Optional.empty());
 
         assertThatThrownBy(() -> service.delete(404L))
                 .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.FEED_NOT_FOUND));
-        verifyNoInteractions(healthGauges);
+        verifyNoInteractions(healthGauges, sourceLock);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void stubSourceIdLookup(JdbcClient.StatementSpec statement, Optional<Long> sourceId) {
+        JdbcClient.MappedQuerySpec<Long> query = mock(JdbcClient.MappedQuerySpec.class);
+        when(statement.query(Long.class)).thenReturn(query);
+        when(query.optional()).thenReturn(sourceId);
     }
 }

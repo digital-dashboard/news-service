@@ -127,6 +127,7 @@ public class FeedIngestService {
                 () -> persister.persist(feed, parsed.entries(), fetchedAt));
         telemetry.recordMissing(sourceKey, parsed.entries());
         telemetry.recordDecisions(sourceKey, counts);
+        telemetry.recordLinkFallbacks(sourceKey, counts.linkFallbacks());
         return IngestReport.completed(feed.getId(), parsed.entries().size(), counts);
     }
 }
