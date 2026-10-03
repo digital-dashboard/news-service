@@ -54,7 +54,8 @@ argus:
     key: ${ARGUS_ADMIN_KEY:${argus_admin_key:}}
   fetch:
     # Not Maven-filtered: the version here is a literal.
-    user-agent: ${ARGUS_FETCH_USER_AGENT:Argus/0.1 (self-hosted RSS aggregator)}
+    # Avoid scraper words such as "aggregator": CBC's CDN resets requests whose User-Agent contains them.
+    user-agent: ${ARGUS_FETCH_USER_AGENT:Argus/0.1 (self-hosted RSS reader)}
     max-body-size: ${ARGUS_FETCH_MAX_BODY_SIZE:5MB}
     max-redirects: ${ARGUS_FETCH_MAX_REDIRECTS:5}
     retry:

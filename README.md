@@ -14,7 +14,7 @@ Argus is the news-aggregation service of the Artemis dashboard. It is a Spring B
 | `ARGUS_TRACING_SAMPLING_PROBABILITY` | | no | Trace sampling, 0.0 to 1.0, default `1.0` |
 | `ARGUS_FETCH_CONNECT_TIMEOUT` | | no | Feed fetch connect timeout, default `5s` |
 | `ARGUS_FETCH_READ_TIMEOUT` | | no | Total deadline per fetch request, including reading the body; applies to each redirect hop, default `15s` |
-| `ARGUS_FETCH_USER_AGENT` | | no | User-Agent sent when fetching feeds, default `Argus/0.1 (self-hosted RSS aggregator)` |
+| `ARGUS_FETCH_USER_AGENT` | | no | User-Agent sent when fetching feeds, default `Argus/0.1 (self-hosted RSS reader)`; avoid words like "aggregator", which some CDNs (CBC) reject |
 | `ARGUS_FETCH_MAX_BODY_SIZE` | | no | Largest feed body accepted, default `5MB` |
 | `ARGUS_FETCH_MAX_REDIRECTS` | | no | Redirects followed per fetch, default `5` |
 | `ARGUS_FETCH_RETRY_MAX_RETRIES` | | no | Max retries on 5xx or transient I/O, default `2` |

@@ -131,7 +131,7 @@ class ApplicationYamlTest {
             assertThat(env.getProperty("spring.http.clients.connect-timeout")).isEqualTo("5s");
             assertThat(env.getProperty("spring.http.clients.read-timeout")).isEqualTo("15s");
             assertThat(env.getProperty("spring.http.clients.redirects")).isEqualTo("dont-follow");
-            assertThat(env.getProperty("argus.fetch.user-agent")).isEqualTo("Argus/0.1 (self-hosted RSS aggregator)");
+            assertThat(env.getProperty("argus.fetch.user-agent")).isEqualTo("Argus/0.1 (self-hosted RSS reader)");
             assertThat(env.getProperty("argus.fetch.max-body-size")).isEqualTo("5MB");
             assertThat(env.getProperty("argus.fetch.max-redirects")).isEqualTo("5");
         });
