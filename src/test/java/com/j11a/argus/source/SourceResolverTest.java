@@ -89,4 +89,24 @@ class SourceResolverTest {
         assertThat(keyFor("https://" + host + "/", "https://feeds.example.test/f"))
                 .hasSize(SourceResolver.MAX_KEY_LENGTH);
     }
+
+    @Test
+    void hostKeyIsTheRegistrableDomainOfTheUriHost() {
+        assertThat(SourceResolver.hostKey(URI.create("https://feeds.bbci.co.uk/news/rss.xml"))).isEqualTo("bbci.co.uk");
+        assertThat(SourceResolver.hostKey(URI.create("https://WWW.Example.COM./feed"))).isEqualTo("example.com");
+    }
+
+    @Test
+    void keyOfLinkIsTheRegistrableDomainOfAnHttpLinkAndNullOtherwise() {
+        assertThat(SourceResolver.keyOfLink("https://www.bbc.co.uk/news")).isEqualTo("bbc.co.uk");
+        assertThat(SourceResolver.keyOfLink(null)).isNull();
+        assertThat(SourceResolver.keyOfLink("/relative")).isNull();
+        assertThat(SourceResolver.keyOfLink("ftp://example.com/")).isNull();
+    }
+
+    @Test
+    void keyForStillPrefersTheSiteLinkAndFallsBackToTheHostKey() {
+        assertThat(keyFor("https://www.bbc.co.uk/", "https://feeds.bbci.co.uk/x")).isEqualTo("bbc.co.uk");
+        assertThat(keyFor(null, "https://feeds.bbci.co.uk/x")).isEqualTo("bbci.co.uk");
+    }
 }

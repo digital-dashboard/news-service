@@ -108,4 +108,25 @@ public class FeedHealthUpdater {
                 .findFirst()
                 .orElse(0);
     }
+
+    /**
+     * Disables a feed whose permanent redirect lands on another feed. This is not a fetch failure, so the failure
+     * count is left alone.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordDuplicate(long feedId, long existingFeedId, Instant now) {
+        String reason = "duplicate of feed " + existingFeedId;
+        jdbc.sql("""
+                UPDATE feed
+                SET enabled = false,
+                    last_error = :reason,
+                    last_fetched_at = :now,
+                    updated_at = :now
+                WHERE id = :id
+                """)
+                .param("id", feedId)
+                .param("reason", reason.length() > MAX_ERROR_LENGTH ? reason.substring(0, MAX_ERROR_LENGTH) : reason)
+                .param("now", now.atOffset(ZoneOffset.UTC))
+                .update();
+    }
 }

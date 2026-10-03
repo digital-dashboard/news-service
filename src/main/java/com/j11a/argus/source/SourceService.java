@@ -2,15 +2,19 @@ package com.j11a.argus.source;
 
 import com.j11a.argus.observability.LogFields;
 import com.j11a.argus.observability.LogKeys;
+import com.j11a.argus.url.HttpUrls;
 import com.j11a.argus.url.StoredUrls;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
+import java.net.URI;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.spi.LoggingEventBuilder;
@@ -63,6 +67,45 @@ public class SourceService {
                 .param("now", OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))
                 .update();
         return sources.findByKey(key).orElseThrow();
+    }
+
+    /**
+     * Narrow source-key rule for feeds created without an explicit source. A site link that names an existing
+     * source is trusted only when the feed's own host, the self link, or the host of a feed that source already
+     * has vouches for it; otherwise the feed gets its host's source.
+     */
+    @Transactional
+    public Source resolveAutomatic(@Nullable String siteLink, @Nullable String selfLink, URI feedUrl) {
+        String siteKey = SourceResolver.keyFor(siteLink, feedUrl);
+        String hostKey = SourceResolver.hostKey(feedUrl);
+        Optional<Source> existing = sources.findByKey(siteKey);
+        if (existing.isEmpty() || isVouched(existing.get(), siteKey, hostKey, selfLink)) {
+            return findOrCreate(siteKey, siteLink);
+        }
+        String redactedUrl = HttpUrls.redact(feedUrl.toString());
+        log.atWarn()
+                .setMessage("Site link of " + redactedUrl + " names source " + siteKey
+                        + " but nothing vouches for it; using " + hostKey)
+                .addKeyValue(LogKeys.SOURCE_KEY, hostKey)
+                .addKeyValue(LogKeys.URL, redactedUrl)
+                .log();
+        return findOrCreate(hostKey, null);
+    }
+
+    private boolean isVouched(Source existing, String siteKey, String hostKey, @Nullable String selfLink) {
+        return siteKey.equals(hostKey)
+                || siteKey.equals(SourceResolver.keyOfLink(selfLink))
+                || feedHostKeysOf(existing.getId()).contains(hostKey);
+    }
+
+    private Set<String> feedHostKeysOf(long sourceId) {
+        return jdbc.sql("SELECT url FROM feed WHERE source_id = :id")
+                .param("id", sourceId)
+                .query(String.class)
+                .list()
+                .stream()
+                .map(url -> SourceResolver.hostKey(URI.create(url)))
+                .collect(Collectors.toSet());
     }
 
     public Optional<Source> findById(long id) {
