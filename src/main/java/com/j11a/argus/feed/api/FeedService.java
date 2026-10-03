@@ -4,6 +4,8 @@ import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.FeedInserter;
 import com.j11a.argus.feed.FeedRepository;
 import com.j11a.argus.feed.NewFeed;
+import com.j11a.argus.feed.health.FeedHealthGauges;
+import com.j11a.argus.feed.health.FeedHealthUpdater;
 import com.j11a.argus.feed.parse.ParsedFeed;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.FeedLoader;
@@ -15,6 +17,7 @@ import com.j11a.argus.url.Links;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import java.net.URI;
+import java.time.Clock;
 import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
@@ -41,14 +44,21 @@ public class FeedService {
     private final SourceService sources;
     private final FeedLoader loader;
     private final FeedIngestService ingest;
+    private final FeedHealthUpdater healthUpdater;
+    private final FeedHealthGauges healthGauges;
+    private final Clock clock;
 
     public FeedService(FeedRepository feeds, FeedInserter inserter, SourceService sources, FeedLoader loader,
-            FeedIngestService ingest) {
+            FeedIngestService ingest, FeedHealthUpdater healthUpdater,
+            FeedHealthGauges healthGauges, Clock clock) {
         this.feeds = feeds;
         this.inserter = inserter;
         this.sources = sources;
         this.loader = loader;
         this.ingest = ingest;
+        this.healthUpdater = healthUpdater;
+        this.healthGauges = healthGauges;
+        this.clock = clock;
     }
 
     public FeedResponse create(CreateFeedRequest request) {
@@ -60,9 +70,10 @@ public class FeedService {
             throw conflict(Optional.of(existingId));
         });
         URI uri = URI.create(url);
-        FeedLoader.Loaded.Parsed loaded = download(uri);
+        FeedLoader.Loaded.CreateParsed loaded = download(uri);
         ParsedFeed parsed = loaded.feed();
         Source source = sources.findOrCreate(SourceResolver.keyFor(parsed.siteLink(), uri), parsed.siteLink());
+        loader.completeCreateTelemetry(loaded, source.getKey());
         long id = inserter.insert(new NewFeed(source.getId(), nameFor(request, parsed, source), url,
                         Links.clean(parsed.siteLink()), request.topic(), languageOf(parsed)))
                 .orElseThrow(() -> conflict(inserter.findIdByUrl(url)));
@@ -70,8 +81,12 @@ public class FeedService {
         // The feed is committed, so a failed first ingest must not turn a successful create into an error.
         try {
             ingest.ingestParsed(feed, parsed, loaded.fetchedAt());
+            healthUpdater.recordSuccess(feed.getId(), loaded.validators(), clock.instant());
         } catch (RuntimeException e) {
             LOG.error("First ingest of feed {} failed; the feed was created and a refresh will retry", feed.getId(), e);
+            healthUpdater.recordFailure(feed.getId(), "first_ingest_failed", clock.instant());
+        } finally {
+            healthGauges.refresh();
         }
         return FeedResponse.of(feed, AdminAccess.isAdmin());
     }
@@ -82,15 +97,12 @@ public class FeedService {
         return FeedResponse.of(feed, AdminAccess.isAdmin());
     }
 
-    private FeedLoader.Loaded.Parsed download(URI uri) {
-        // The source row does not exist yet, so the fetch is tagged with the feed-URL host, which can differ from the
-        // site-link key that refreshes use.
-        return switch (loader.load(uri, SourceResolver.keyFor(null, uri))) {
-            case FeedLoader.Loaded.Parsed parsed -> parsed;
-            case FeedLoader.Loaded.NotModified ignored ->
-                    throw new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", "not_modified"));
-            case FeedLoader.Loaded.Failed(var reason) ->
+    private FeedLoader.Loaded.CreateParsed download(URI uri) {
+        return switch (loader.loadForCreate(uri)) {
+            case FeedLoader.Loaded.CreateParsed parsed -> parsed;
+            case FeedLoader.Loaded.Failed(var reason, var ignored) ->
                     throw new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", reason));
+            default -> throw new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", "unknown"));
         };
     }
 

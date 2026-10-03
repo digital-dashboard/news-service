@@ -15,6 +15,9 @@ import com.j11a.argus.feed.FeedInserter;
 import com.j11a.argus.feed.FeedRepository;
 import com.j11a.argus.feed.NewFeed;
 import com.j11a.argus.feed.Topic;
+import com.j11a.argus.feed.fetch.FetchValidators;
+import com.j11a.argus.feed.health.FeedHealthGauges;
+import com.j11a.argus.feed.health.FeedHealthUpdater;
 import com.j11a.argus.feed.parse.ParsedFeed;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.FeedLoader;
@@ -22,8 +25,11 @@ import com.j11a.argus.source.Source;
 import com.j11a.argus.source.SourceService;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
+import io.micrometer.core.instrument.Timer;
 import java.net.URI;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,7 +46,11 @@ class FeedServiceTest {
     private final SourceService sources = mock(SourceService.class);
     private final FeedLoader loader = mock(FeedLoader.class);
     private final FeedIngestService ingest = mock(FeedIngestService.class);
-    private final FeedService service = new FeedService(feeds, inserter, sources, loader, ingest);
+    private final FeedHealthUpdater healthUpdater = mock(FeedHealthUpdater.class);
+    private final FeedHealthGauges healthGauges = mock(FeedHealthGauges.class);
+    private final Clock clock = Clock.fixed(FETCHED_AT, ZoneOffset.UTC);
+    private final FeedService service = new FeedService(feeds, inserter, sources, loader, ingest,
+            healthUpdater, healthGauges, clock);
 
     @BeforeEach
     void stubSource() {
@@ -53,7 +63,8 @@ class FeedServiceTest {
 
     private void loads(String title, String language) {
         ParsedFeed parsed = new ParsedFeed(title, "https://example.test/", null, language, List.of());
-        when(loader.load(any(URI.class), anyString())).thenReturn(new FeedLoader.Loaded.Parsed(parsed, FETCHED_AT));
+        when(loader.loadForCreate(any(URI.class))).thenReturn(
+                new FeedLoader.Loaded.CreateParsed(parsed, FETCHED_AT, FetchValidators.EMPTY, 100, mock(Timer.Sample.class)));
     }
 
     private static Feed storedFeed() {
@@ -106,6 +117,8 @@ class FeedServiceTest {
         verify(inserter).insert(inserted.capture());
         assertThat(inserted.getValue().name()).hasSize(FeedService.MAX_NAME_LENGTH);
         assertThat(inserted.getValue().language()).isNull();
+        verify(healthUpdater).recordSuccess(9L, FetchValidators.EMPTY, FETCHED_AT);
+        verify(healthGauges).refresh();
     }
 
     @Test
@@ -146,7 +159,7 @@ class FeedServiceTest {
 
     @Test
     void aFeedThatCannotBeReadIsRejectedWithTheLoaderReason() {
-        when(loader.load(any(URI.class), anyString())).thenReturn(new FeedLoader.Loaded.Failed("not_a_feed"));
+        when(loader.loadForCreate(any(URI.class))).thenReturn(new FeedLoader.Loaded.Failed("not_a_feed"));
 
         assertThatThrownBy(() -> service.create(request()))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
@@ -166,6 +179,8 @@ class FeedServiceTest {
         FeedResponse response = service.create(request());
 
         assertThat(response.id()).isEqualTo(9L);
+        verify(healthUpdater).recordFailure(9L, "first_ingest_failed", FETCHED_AT);
+        verify(healthGauges).refresh();
     }
 
     @Test

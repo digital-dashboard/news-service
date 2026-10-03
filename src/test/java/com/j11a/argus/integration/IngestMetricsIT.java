@@ -3,6 +3,7 @@ package com.j11a.argus.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.j11a.argus.feed.Topic;
+import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.observability.MeterSpec;
@@ -64,8 +65,8 @@ class IngestMetricsIT extends AbstractIntegrationTest {
 
     @Test
     void creatingAFeedRecordsFetchIngestDecisionAndDataQualityMeters() {
-        long fetchBefore = timerCount(MetricNames.FETCH, "source", URL_SOURCE, "outcome", "fetched", "reason", "none");
-        long sizeBefore = summaryCount(MetricNames.FETCH_SIZE, "source", URL_SOURCE);
+        long fetchBefore = timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "fetched", "reason", "none");
+        long sizeBefore = summaryCount(MetricNames.FETCH_SIZE, "source", SITE_SOURCE);
         long ingestBefore = timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "completed");
         double insertedBefore = decisions("inserted", "none");
         double skippedBefore = decisions("skipped", "missing_identity");
@@ -76,9 +77,9 @@ class IngestMetricsIT extends AbstractIntegrationTest {
 
         create();
 
-        assertThat(timerCount(MetricNames.FETCH, "source", URL_SOURCE, "outcome", "fetched", "reason", "none"))
+        assertThat(timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "fetched", "reason", "none"))
                 .isEqualTo(fetchBefore + 1);
-        assertThat(summaryCount(MetricNames.FETCH_SIZE, "source", URL_SOURCE)).isEqualTo(sizeBefore + 1);
+        assertThat(summaryCount(MetricNames.FETCH_SIZE, "source", SITE_SOURCE)).isEqualTo(sizeBefore + 1);
         assertThat(registry.find(MetricNames.FETCH_SIZE).summary().getId().getBaseUnit()).isEqualTo("bytes");
         assertThat(timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "completed"))
                 .isEqualTo(ingestBefore + 1);
@@ -88,6 +89,19 @@ class IngestMetricsIT extends AbstractIntegrationTest {
         assertThat(missing("guid")).isEqualTo(guidBefore + 2);
         assertThat(missing("image")).isEqualTo(imageBefore + 3);
         assertThat(missing("author")).isEqualTo(authorBefore + 3);
+    }
+
+    @Test
+    void aFailedCreateFetchIsTaggedUnknown() {
+        stub.serve("/missing-create.xml", 404, "text/plain", new byte[0]);
+        long unknownBefore = timerCount(MetricNames.FETCH, "source", "unknown", "outcome", "failed", "reason", "http_status");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                feedService.create(new CreateFeedRequest(stub.baseUrl() + "/missing-create.xml", null, Topic.TECH)))
+                .isInstanceOf(com.j11a.argus.web.error.ApiException.class);
+
+        assertThat(timerCount(MetricNames.FETCH, "source", "unknown", "outcome", "failed", "reason", "http_status"))
+                .isEqualTo(unknownBefore + 1);
     }
 
     @Test
@@ -104,12 +118,13 @@ class IngestMetricsIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void aFailedFetchIsTaggedWithItsReason() {
+    void aFailedFetchIsTaggedWithItsReasonAndRetriesAreCountedUnderStoredSource() {
         FeedResponse feed = create();
         stub.serve(PATH, 503, "text/plain", new byte[0]);
         long before = timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "failed",
                 "reason", "http_status");
         long failedIngestBefore = timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "failed");
+        double retriesBefore = counter(MetricNames.FETCH_RETRY, "source", SITE_SOURCE);
 
         ingestService.refresh(feed.id());
 
@@ -117,6 +132,8 @@ class IngestMetricsIT extends AbstractIntegrationTest {
                 .isEqualTo(before + 1);
         assertThat(timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "failed"))
                 .isEqualTo(failedIngestBefore + 1);
+        assertThat(counter(MetricNames.FETCH_RETRY, "source", SITE_SOURCE))
+                .isGreaterThanOrEqualTo(retriesBefore + 1);
     }
 
     @Test
@@ -142,12 +159,20 @@ class IngestMetricsIT extends AbstractIntegrationTest {
                 .allSatisfy(timer -> assertThat(timer.getId().getTag("uri")).doesNotContain("/metrics"));
     }
 
+    private static final Set<String> ALLOWED_FEED_ID_METERS = Set.of(
+            MetricNames.FEED_STATE,
+            MetricNames.FEED_CONSECUTIVE_FAILURES,
+            MetricNames.FEED_SINCE_LAST_SUCCESS);
+
     @Test
     void noMeterCarriesAFeedIdUrlOrGuidTag() {
         create();
 
         assertThat(registry.getMeters()).allSatisfy(meter -> {
-            assertThat(tagKeys(meter)).doesNotContainAnyElementsOf(FORBIDDEN_TAG_KEYS);
+            Set<String> forbidden = ALLOWED_FEED_ID_METERS.contains(meter.getId().getName())
+                    ? Set.of("feed.id", "url", "guid", "link")
+                    : FORBIDDEN_TAG_KEYS;
+            assertThat(tagKeys(meter)).doesNotContainAnyElementsOf(forbidden);
             if (meter.getId().getName().startsWith(MetricNames.PREFIX)) {
                 assertThat(meter.getId().getTags()).extracting(Tag::getValue).noneMatch(value -> value.contains("://"));
             }

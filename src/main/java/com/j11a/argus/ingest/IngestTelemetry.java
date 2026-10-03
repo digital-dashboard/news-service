@@ -12,6 +12,7 @@ import com.j11a.argus.feed.parse.ParsedEntry;
 import com.j11a.argus.observability.MetricNames;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
 import io.micrometer.tracing.Span;
@@ -93,6 +94,42 @@ public class IngestTelemetry {
             case FetchResult.Failed failed -> finishFetch(observation, FAILED, failed.reason().tag());
         }
         return result;
+    }
+
+    Timer.Sample startTimerSample() {
+        return Timer.start(meters);
+    }
+
+    void recordCreateFetch(Timer.Sample sample, String sourceKey, int bodyLength) {
+        sample.stop(Timer.builder(MetricNames.FETCH)
+                .tag(SOURCE, sourceKey)
+                .tag(OUTCOME, FETCHED)
+                .tag(REASON, NO_REASON)
+                .tag("error", "none")
+                .register(meters));
+        DistributionSummary.builder(MetricNames.FETCH_SIZE)
+                .baseUnit("bytes")
+                .tag(SOURCE, sourceKey)
+                .register(meters)
+                .record(bodyLength);
+    }
+
+    void recordFailedCreateFetch(Timer.Sample sample, String reason) {
+        sample.stop(Timer.builder(MetricNames.FETCH)
+                .tag(SOURCE, "unknown")
+                .tag(OUTCOME, FAILED)
+                .tag(REASON, reason)
+                .tag("error", "none")
+                .register(meters));
+    }
+
+    void recordFailedCreateParse(Timer.Sample sample) {
+        sample.stop(Timer.builder(MetricNames.FETCH)
+                .tag(SOURCE, "unknown")
+                .tag(OUTCOME, FETCHED)
+                .tag(REASON, NO_REASON)
+                .tag("error", "none")
+                .register(meters));
     }
 
     private static void finishFetch(Observation observation, String outcome, String reason) {
