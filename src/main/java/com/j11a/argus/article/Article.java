@@ -20,7 +20,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import org.jspecify.annotations.Nullable;
 
-/** Read-only view: rows are written by ArticleInserter. */
+/** Read-only view: rows are written by ArticleWriter. */
 @Entity
 @Immutable
 @Table(name = "article")

@@ -307,15 +307,15 @@ Telemetry:
 
 ### Acceptance criteria
 
-- [ ] Unit tests cover every link-cleaner rule (applying it twice gives the same result) and every source-resolver case, including multi-part public suffixes.
-- [ ] Unit tests cover one rule each for the entry dedup resolver.
-- [ ] The same article in two feeds of one source is stored once, with two feed links, and appears under both topics.
-- [ ] Two feeds of one source ingested concurrently with overlapping items produce no duplicates. A forced conflicting insert is absorbed.
-- [ ] A changed GUID with the same link updates the existing article. A homepage-link feed keeps its distinct items separate.
-- [ ] An edited upstream article is updated in place, with no new article.
-- [ ] With the seed context on, a fresh database starts with the seeded sources and feeds. A seeded feed deleted through the API stays deleted after a restart.
-- [ ] Meter-registry tests assert each decision, link-fallback outcome and lock-wait meter with its tags.
-- [ ] A re-key migration recomputes `guid_key`/`link_key` with the full link cleaner and collapses collisions, so the first poll after Phase 4 creates no duplicates of Phase 2 articles.
+- [x] Unit tests cover every link-cleaner rule (applying it twice gives the same result) and every source-resolver case, including multi-part public suffixes.
+- [x] Unit tests cover one rule each for the entry dedup resolver.
+- [x] The same article in two feeds of one source is stored once, with two feed links, and appears under both topics.
+- [x] Two feeds of one source ingested concurrently with overlapping items produce no duplicates. A forced conflicting insert is absorbed.
+- [x] A changed GUID with the same link updates the existing article. A homepage-link feed keeps its distinct items separate.
+- [x] An edited upstream article is updated in place, with no new article.
+- [x] With the seed context on, a fresh database starts with the seeded sources and feeds. A seeded feed deleted through the API stays deleted after a restart.
+- [x] Meter-registry tests assert each decision, link-fallback outcome and lock-wait meter with its tags.
+- [x] A re-key migration recomputes `guid_key`/`link_key` with the full link cleaner and collapses collisions, so the first poll after Phase 4 creates no duplicates of Phase 2 articles.
 
 ---
 

@@ -52,6 +52,14 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 - **Polling:** duration of feed polling runs (p95 and max by trigger), poll outcomes (`completed`: the run reached the end even if some feeds failed; `failed`: the run itself threw; `interrupted`: shutdown cut it short), transient HTTP fetch retries by source, and the share of fetches that ended in 304 Not Modified. The `source` variable filters the retries and the 304 ratio.
 - **Feed health:** one table row per feed with its state, consecutive failures and time since the last successful fetch (including 304), with a link to the feed's Loki logs. Failures are orange from 1 and red from 3; time since last success is orange from 1 hour and red from 6 hours, and `never` means the feed has not succeeded since it was added. **Stalest feeds** lists the five longest-stale feeds; a feed that never succeeded is lifted above all others and shows as `never`.
 - **Ingestion pipeline:** are feed fetches succeeding and how fast (outcomes by reason, fetch and ingest p95 per source), how large the downloads are, and what happened to each entry (inserted, unchanged, skipped). The `source` variable filters these panels.
+- **Deduplication:** what happened to entries and how sources serialise ingest. All panels follow the `source` variable.
+  - **Entry decisions:** rate of each decision (inserted, updated, linked, unchanged, skipped), so a feed's mix is visible at a glance.
+  - **Skip reasons:** skipped entries by reason. `missing_identity` means an entry had no usable GUID or link; `batch_duplicate` means a repeat within one download.
+  - **Link-fallback outcomes:** how often a link match replaced a stored GUID (`guid_replaced`) and how often the homepage (`guarded_homepage`) or shared-link (`guarded_shared`) guard refused a link match.
+  - **Lock wait p95 by source:** how long ingest waited for a source's advisory lock. Rising values mean feeds of one source are contending.
+  - **Updates by reason:** updated entries as `content_changed`, `timestamp_only` or `insert_conflict` (a concurrent insert was absorbed). A steady `timestamp_only` stream on a feed means its update times move without edits.
+  - **Duplicate pressure:** linked plus unchanged as a share of entries seen: how much of each download was already known.
+  - **Cross-feed overlap:** linked as a share of inserted plus linked: how much new-to-this-feed content other feeds of the source already supplied.
 - **Data quality:** how often parsed entries lack a field (date, GUID, image, author), as a rate and as a share of all entries seen, so a feed that stops providing a field stands out.
 - **Scheduled jobs:** scheduled poll runs by outcome: `success` (the poll completed), `skipped` (the previous poll was still running), `error` (the poll failed unexpectedly) or `interrupted` (shutdown cut it short, expected during a deploy).
 - **API & HTTP, JVM & runtime, PostgreSQL & HikariCP, Container:** request rate, latency and status; heap, GC, threads and CPU; pool and database health; container CPU and memory.
@@ -117,6 +125,15 @@ Phase 3 additions, after the dashboard is imported:
 - [ ] The 304 ratio rises on the second poll as unchanged feeds return Not Modified.
 - [ ] Right after a restart the last-poll-age stat shows `never` until the first poll completes; that is expected, not a fault.
 - [ ] During a deploy the poll outcome and job-run panels show `interrupted`, never `error`.
+
+Phase 4 additions, after the dashboard is imported and the first poll has run:
+
+- [ ] `GET /news/v2/sources` lists 17 sources, and BBC has 3 feeds and country GB.
+- [ ] The first poll ingests the seeds; the "New articles 24h" stat jumps, which is expected.
+- [ ] BBC News, World and Football produce `linked` decisions in Entry decisions, and Cross-feed overlap is above 0.
+- [ ] Lock wait p95 shows values for `bbc.co.uk` and `cbc.ca`.
+- [ ] A second poll is mostly `unchanged`, with `updated{timestamp_only}` near 0. If a feed shows a steady stream of `timestamp_only`, note it.
+- [ ] The WordPress seeds (CityNews, Global News and others) send ETags, so the 304 ratio rises on the second poll. This closes the phase 3 note.
 
 ## Shutdown time
 
