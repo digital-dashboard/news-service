@@ -17,6 +17,13 @@ Argus is the news-aggregation service of the Artemis dashboard. It is a Spring B
 | `ARGUS_FETCH_USER_AGENT` | | no | User-Agent sent when fetching feeds, default `Argus/0.1 (self-hosted RSS aggregator)` |
 | `ARGUS_FETCH_MAX_BODY_SIZE` | | no | Largest feed body accepted, default `5MB` |
 | `ARGUS_FETCH_MAX_REDIRECTS` | | no | Redirects followed per fetch, default `5` |
+| `ARGUS_FETCH_RETRY_MAX_RETRIES` | | no | Max retries on 5xx or transient I/O, default `2` |
+| `ARGUS_FETCH_RETRY_DELAY` | | no | Initial delay before retry, default `1s` |
+| `ARGUS_FETCH_RETRY_MULTIPLIER` | | no | Exponential backoff multiplier, default `2.0` |
+| `ARGUS_FETCH_RETRY_TIMEOUT` | | no | Overall per-fetch retry budget, default `25s` |
+| `ARGUS_POLL_CRON` | | no | Cron expression for scheduled feed polling, default `0 */15 * * * *` (set to `-` to disable) |
+| `ARGUS_POLL_CONCURRENCY` | | no | Max concurrent virtual thread workers for feed polling, default `8` |
+| `ARGUS_POLL_FAILING_THRESHOLD` | | no | Consecutive failure count at which an enabled feed is marked failing, default `3` |
 
 Secret files are read from `/run/secrets/`. Argus refuses to start when a required value is missing or invalid, and never prints the admin key or the password.
 
@@ -46,8 +53,12 @@ Everything is under `/news/v2`. Writes need the `X-Admin-Key` header; reads don'
 Feed URLs can carry tokens, and reads are open. Without a valid admin key, every response that contains a feed URL shows it without user-info and query string (`scheme://host[:port]/path`). With a valid `X-Admin-Key`, even on a `GET`, the full URL is returned. `siteUrl` is a public site link and is always shown as stored.
 
 - `POST /feeds`: add a feed. Body `url`, `topic` and optional `name`. Returns 201, or 400 (validation, including a URL with user-info such as `http://user:pass@host/feed`), 401 (missing or wrong key), 409 `FEED_URL_CONFLICT` (that exact URL exists) or 422 `FEED_INVALID` (the URL could not be fetched or is not a feed; `reason` says why).
-- `GET /feeds/{id}`: one feed, or 404 `FEED_NOT_FOUND`.
+- `GET /feeds?page&size`: paged list of feeds with health (`state`, `consecutiveFailures`, `lastFetchedAt`, `lastSuccessAt`, `lastError`), ordered by `id ASC`. `page` defaults to 0; `size` defaults to 20 (max 100). URLs are redacted without the admin key.
+- `GET /feeds/{id}`: one feed with health, or 404 `FEED_NOT_FOUND`. URL is redacted without the admin key.
+- `PATCH /feeds/{id}`: toggle feed enabled state. Body `{"enabled": boolean}`. Needs `X-Admin-Key`. Returns the updated feed with its current state. Takes effect on the next poll.
+- `DELETE /feeds/{id}`: delete a feed and its orphan articles in one transaction. Articles still linked to another feed are preserved; the source row is kept. Needs `X-Admin-Key`. Returns 204 or 404 `FEED_NOT_FOUND`.
 - `POST /feeds/{id}/refresh`: fetch and ingest now, and return the ingest report. It answers 200 even when the upstream failed; the report then has `outcome=FAILED`. An unknown id is 404 `FEED_NOT_FOUND`.
+- `POST /feeds/refresh`: synchronous manual poll of all enabled feeds across virtual thread workers. Returns 200 with an `AggregatePollReport`. Needs `X-Admin-Key`. If another poll is currently running (manual or scheduled), returns 409 `POLL_IN_PROGRESS`.
 - `GET /articles?page&size`: articles, newest first. `page` is zero-based and defaults to 0; `size` is 1 to 100 and defaults to 20. A page whose offset (`page * size`) exceeds the 32-bit range is 400 `VALIDATION_FAILED`.
 
 ```bash

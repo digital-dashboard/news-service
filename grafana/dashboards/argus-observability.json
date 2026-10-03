@@ -1,6 +1,6 @@
 {
   "uid": "argus-observability",
-  "title": "Argus — Observability",
+  "title": "Argus \u2014 Observability",
   "description": "Argus service health: HTTP RED metrics, the ingestion pipeline, data quality, JVM, PostgreSQL and HikariCP, container resources, Tempo traces and Loki logs. Version-controlled in grafana/dashboards and validated by the Argus dashboard tests.",
   "tags": [
     "argus",
@@ -448,6 +448,624 @@
       }
     },
     {
+      "id": 40,
+      "type": "stat",
+      "title": "Last poll age",
+      "description": "Seconds since the last successful feed poll across all enabled feeds. Shows never if no poll has succeeded yet.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "time() - max(argus_poll_last_success_seconds{job=\"argus\"})",
+          "editorMode": "code",
+          "range": false,
+          "instant": true,
+          "legendFormat": "last poll"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 900
+              },
+              {
+                "color": "red",
+                "value": 1800
+              }
+            ]
+          },
+          "unit": "s",
+          "noValue": "never"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 41,
+      "type": "stat",
+      "title": "Feeds enabled / failing",
+      "description": "Count of enabled and failing feeds. A feed is failing when consecutive failures reach or exceed the failing threshold (default 3).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "count(argus_feed_state{job=\"argus\",state=~\"healthy|failing\"}) or vector(0)",
+          "editorMode": "code",
+          "range": false,
+          "instant": true,
+          "legendFormat": "enabled"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "count(argus_feed_state{job=\"argus\",state=\"failing\"}) or vector(0)",
+          "editorMode": "code",
+          "range": false,
+          "instant": true,
+          "legendFormat": "failing"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failing"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 42,
+      "type": "stat",
+      "title": "New articles 24h",
+      "description": "Total articles inserted into the database in the trailing 24 hours across all feeds.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum(increase(argus_ingest_entries_total{job=\"argus\",decision=\"inserted\"}[24h])) or vector(0)",
+          "editorMode": "code",
+          "range": false,
+          "instant": true,
+          "legendFormat": "inserted"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 43,
+      "type": "row",
+      "title": "Polling",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "panels": []
+    },
+    {
+      "id": 44,
+      "type": "timeseries",
+      "title": "Poll duration",
+      "description": "Duration of feed polling runs: p95 by trigger and max duration by trigger.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, trigger) (rate(argus_poll_seconds_bucket{job=\"argus\"}[$__rate_interval]))) >= 0",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "p95 {{trigger}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max by (trigger) (argus_poll_seconds_max{job=\"argus\"})",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "max {{trigger}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Poll outcomes",
+      "description": "Rate of completed and failed feed polling executions per second by trigger.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (trigger, outcome) (rate(argus_poll_seconds_count{job=\"argus\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{trigger}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 46,
+      "type": "timeseries",
+      "title": "Retries by source",
+      "description": "Rate of transient HTTP fetch retries per second grouped by feed source.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (source) (rate(argus_fetch_retry_total{job=\"argus\",source=~\"$source\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 47,
+      "type": "timeseries",
+      "title": "304 ratio",
+      "description": "Proportion of HTTP fetch requests returning 304 Not Modified, saving network bandwidth and compute.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum(rate(argus_fetch_seconds_count{job=\"argus\",source=~\"$source\",outcome=\"not_modified\"}[$__rate_interval])) / clamp_min(sum(rate(argus_fetch_seconds_count{job=\"argus\",source=~\"$source\"}[$__rate_interval])), 0.000000001)",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "304 ratio"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 48,
+      "type": "row",
+      "title": "Feed health",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "panels": []
+    },
+    {
+      "id": 49,
+      "type": "table",
+      "title": "Feed health",
+      "description": "Per-feed operational state, consecutive failures, and duration since last success. Click a row to view its logs in Loki.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 27
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "argus_feed_state{job=\"argus\"} == 1",
+          "editorMode": "code",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "argus_feed_consecutive_failures{job=\"argus\"}",
+          "editorMode": "code",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "argus_feed_since_last_success_seconds{job=\"argus\"}",
+          "editorMode": "code",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "Logs for feed ${__data.fields.feed_id}",
+              "url": "/explore?left=%7B%22datasource%22:%22${DS_LOKI}%22,%22queries%22:%5B%7B%22expr%22:%22%7Bservice=%5C%22argus%5C%22%7D%20%7C%20json%20%7C%20feedId=%5C%22${__data.fields.feed_id}%5C%22%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 50,
+      "type": "timeseries",
+      "title": "Stalest feeds",
+      "description": "Feeds with the longest elapsed time in seconds since their last successful ingest.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 27
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "topk(5, argus_feed_since_last_success_seconds{job=\"argus\"})",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "feed {{feed_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 29,
       "type": "row",
       "title": "Ingestion pipeline",
@@ -456,7 +1074,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 5
+        "y": 35
       },
       "panels": []
     },
@@ -473,7 +1091,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 6
+        "y": 36
       },
       "targets": [
         {
@@ -530,7 +1148,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 6
+        "y": 36
       },
       "targets": [
         {
@@ -587,7 +1205,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 14
+        "y": 44
       },
       "targets": [
         {
@@ -644,7 +1262,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 14
+        "y": 44
       },
       "targets": [
         {
@@ -701,7 +1319,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 14
+        "y": 44
       },
       "targets": [
         {
@@ -758,7 +1376,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 22
+        "y": 52
       },
       "panels": []
     },
@@ -775,7 +1393,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 23
+        "y": 53
       },
       "targets": [
         {
@@ -832,7 +1450,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 23
+        "y": 53
       },
       "targets": [
         {
@@ -877,6 +1495,76 @@
       }
     },
     {
+      "id": 51,
+      "type": "row",
+      "title": "Scheduled jobs",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 61
+      },
+      "panels": []
+    },
+    {
+      "id": 52,
+      "type": "timeseries",
+      "title": "Job runs by outcome",
+      "description": "Count of scheduled job runs by job name and outcome (success, skipped, or error).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 62
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (scheduled_job, outcome) (increase(argus_scheduled_job_total{job=\"argus\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{scheduled_job}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 6,
       "type": "row",
       "title": "API & HTTP",
@@ -885,7 +1573,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 70
       },
       "panels": []
     },
@@ -902,7 +1590,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 32
+        "y": 71
       },
       "targets": [
         {
@@ -959,7 +1647,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 32
+        "y": 71
       },
       "targets": [
         {
@@ -1040,7 +1728,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 79
       },
       "targets": [
         {
@@ -1097,7 +1785,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 87
       },
       "panels": []
     },
@@ -1114,7 +1802,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 49
+        "y": 88
       },
       "targets": [
         {
@@ -1183,7 +1871,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 49
+        "y": 88
       },
       "targets": [
         {
@@ -1240,7 +1928,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 57
+        "y": 96
       },
       "targets": [
         {
@@ -1296,7 +1984,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 57
+        "y": 96
       },
       "targets": [
         {
@@ -1362,7 +2050,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 104
       },
       "panels": []
     },
@@ -1379,7 +2067,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 66
+        "y": 105
       },
       "targets": [
         {
@@ -1471,7 +2159,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 66
+        "y": 105
       },
       "targets": [
         {
@@ -1528,7 +2216,7 @@
         "h": 4,
         "w": 12,
         "x": 0,
-        "y": 74
+        "y": 113
       },
       "targets": [
         {
@@ -1594,7 +2282,7 @@
         "h": 4,
         "w": 12,
         "x": 0,
-        "y": 78
+        "y": 117
       },
       "targets": [
         {
@@ -1656,7 +2344,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 74
+        "y": 117
       },
       "targets": [
         {
@@ -1720,7 +2408,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 82
+        "y": 125
       },
       "panels": []
     },
@@ -1737,7 +2425,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 83
+        "y": 126
       },
       "targets": [
         {
@@ -1793,7 +2481,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 83
+        "y": 126
       },
       "targets": [
         {
@@ -1846,7 +2534,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 91
+        "y": 134
       },
       "panels": []
     },
@@ -1863,7 +2551,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 92
+        "y": 135
       },
       "targets": [
         {
@@ -1893,7 +2581,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 102
+        "y": 145
       },
       "panels": []
     },
@@ -1910,7 +2598,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 103
+        "y": 146
       },
       "targets": [
         {
@@ -1969,7 +2657,7 @@
         "h": 14,
         "w": 24,
         "x": 0,
-        "y": 111
+        "y": 154
       },
       "targets": [
         {

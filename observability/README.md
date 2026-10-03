@@ -48,9 +48,12 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 
 ## What the rows answer
 
-- **Overview:** is the service up, how long has it run, and are requests failing or slow.
+- **Overview:** is the service up, how long has it run, are requests failing or slow, age of the last successful feed poll, counts of enabled and failing feeds, and total articles inserted in the last 24h.
+- **Polling:** duration of feed polling runs (p95 and max by trigger), completed vs failed poll outcomes, transient HTTP fetch retries by source, and the ratio of 304 Not Modified responses.
+- **Feed health:** per-feed operational state, consecutive failures, and duration since last success, with links to Loki logs, and the stalest feeds.
 - **Ingestion pipeline:** are feed fetches succeeding and how fast (outcomes by reason, fetch and ingest p95 per source), how large the downloads are, and what happened to each entry (inserted, unchanged, skipped). The `source` variable filters these panels.
 - **Data quality:** how often parsed entries lack a field (date, GUID, image, author), as a rate and as a share of all entries seen, so a feed that stops providing a field stands out.
+- **Scheduled jobs:** background scheduled job runs broken down by outcome (`success`, `skipped`, `error`).
 - **API & HTTP, JVM & runtime, PostgreSQL & HikariCP, Container:** request rate, latency and status; heap, GC, threads and CPU; pool and database health; container CPU and memory.
 - **Traces, Logs:** slow and errored traces from Tempo, and the live Loki log stream.
 
@@ -105,3 +108,10 @@ Phase 2 additions, after the dashboard is imported:
 - [ ] The Ingestion pipeline and Data quality rows show data.
 - [ ] After a refresh, Tempo shows an `argus.ingest` trace with fetch, parse and persist children and an outbound client span. (After POST /feeds, fetch and parse sit beside `argus.ingest`, not under it.)
 - [ ] Loki ingest log lines carry `feedId` and `sourceId`.
+
+Phase 3 additions, after the dashboard is imported:
+
+- [ ] The poll runs on schedule, and the last-poll-age stat stays under 15 min.
+- [ ] A deliberately broken feed shows as failing in the feed-health table, with the right failure count.
+- [ ] A refresh-all (`POST /news/v2/feeds/refresh`) during a running poll returns 409.
+- [ ] The 304 ratio rises on the second poll as unchanged feeds return Not Modified.

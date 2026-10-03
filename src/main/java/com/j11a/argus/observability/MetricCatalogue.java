@@ -1,10 +1,14 @@
 package com.j11a.argus.observability;
 
 import static com.j11a.argus.observability.MetricNames.Tags.DECISION;
+import static com.j11a.argus.observability.MetricNames.Tags.FEED_ID;
 import static com.j11a.argus.observability.MetricNames.Tags.KIND;
 import static com.j11a.argus.observability.MetricNames.Tags.OUTCOME;
 import static com.j11a.argus.observability.MetricNames.Tags.REASON;
+import static com.j11a.argus.observability.MetricNames.Tags.SCHEDULED_JOB;
 import static com.j11a.argus.observability.MetricNames.Tags.SOURCE;
+import static com.j11a.argus.observability.MetricNames.Tags.STATE;
+import static com.j11a.argus.observability.MetricNames.Tags.TRIGGER;
 
 import java.util.List;
 import java.util.Set;
@@ -17,7 +21,14 @@ public final class MetricCatalogue {
             new MeterSpec(MetricNames.INGEST, MeterKind.TIMER, null, Set.of(SOURCE, OUTCOME)),
             new MeterSpec(MetricNames.FETCH_SIZE, MeterKind.DISTRIBUTION_SUMMARY, "bytes", Set.of(SOURCE)),
             new MeterSpec(MetricNames.INGEST_ENTRIES, MeterKind.COUNTER, null, Set.of(SOURCE, DECISION, REASON)),
-            new MeterSpec(MetricNames.PARSE_MISSING, MeterKind.COUNTER, null, Set.of(SOURCE, KIND)));
+            new MeterSpec(MetricNames.PARSE_MISSING, MeterKind.COUNTER, null, Set.of(SOURCE, KIND)),
+            new MeterSpec(MetricNames.POLL, MeterKind.TIMER, null, Set.of(TRIGGER, OUTCOME)),
+            new MeterSpec(MetricNames.FETCH_RETRY, MeterKind.COUNTER, null, Set.of(SOURCE)),
+            new MeterSpec(MetricNames.SCHEDULED_JOB, MeterKind.COUNTER, null, Set.of(SCHEDULED_JOB, OUTCOME)),
+            new MeterSpec(MetricNames.FEED_STATE, MeterKind.GAUGE, null, Set.of(FEED_ID, STATE)),
+            new MeterSpec(MetricNames.FEED_CONSECUTIVE_FAILURES, MeterKind.GAUGE, null, Set.of(FEED_ID)),
+            new MeterSpec(MetricNames.FEED_SINCE_LAST_SUCCESS, MeterKind.GAUGE, "seconds", Set.of(FEED_ID)),
+            new MeterSpec(MetricNames.POLL_LAST_SUCCESS, MeterKind.GAUGE, "seconds", Set.of()));
 
     private static final Set<String> ALLOWED_TAGS = MetricNames.Tags.all();
 

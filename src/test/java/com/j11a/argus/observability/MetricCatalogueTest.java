@@ -62,12 +62,20 @@ class MetricCatalogueTest {
     }
 
     @Test
-    void cataloguesThePhaseTwoIngestMeters() {
+    void cataloguesAllIngestAndPollMeters() {
         assertThat(MetricCatalogue.all()).extracting(MeterSpec::name).containsExactlyInAnyOrder(
                 MetricNames.FETCH, MetricNames.INGEST, MetricNames.FETCH_SIZE, MetricNames.INGEST_ENTRIES,
-                MetricNames.PARSE_MISSING);
+                MetricNames.PARSE_MISSING, MetricNames.POLL, MetricNames.FETCH_RETRY, MetricNames.SCHEDULED_JOB,
+                MetricNames.FEED_STATE, MetricNames.FEED_CONSECUTIVE_FAILURES, MetricNames.FEED_SINCE_LAST_SUCCESS,
+                MetricNames.POLL_LAST_SUCCESS);
         assertThat(MetricCatalogue.all()).filteredOn(spec -> spec.name().equals(MetricNames.FETCH_SIZE))
                 .singleElement().satisfies(spec -> assertThat(spec.prometheusBase())
                         .isEqualTo("argus_fetch_size_bytes"));
+        assertThat(MetricCatalogue.all()).filteredOn(spec -> spec.name().equals(MetricNames.FEED_SINCE_LAST_SUCCESS))
+                .singleElement().satisfies(spec -> assertThat(spec.prometheusBase())
+                        .isEqualTo("argus_feed_since_last_success_seconds"));
+        assertThat(MetricCatalogue.all()).filteredOn(spec -> spec.name().equals(MetricNames.POLL_LAST_SUCCESS))
+                .singleElement().satisfies(spec -> assertThat(spec.prometheusBase())
+                        .isEqualTo("argus_poll_last_success_seconds"));
     }
 }

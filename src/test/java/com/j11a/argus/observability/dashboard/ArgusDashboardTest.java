@@ -55,8 +55,8 @@ class ArgusDashboardTest {
                 .toList();
 
         assertThat(rows).containsExactly(
-                "Overview", "Ingestion pipeline", "Data quality", "API & HTTP", "JVM & runtime",
-                "PostgreSQL & HikariCP", "Container", "Traces", "Logs");
+                "Overview", "Polling", "Feed health", "Ingestion pipeline", "Data quality", "Scheduled jobs",
+                "API & HTTP", "JVM & runtime", "PostgreSQL & HikariCP", "Container", "Traces", "Logs");
     }
 
     @Test
