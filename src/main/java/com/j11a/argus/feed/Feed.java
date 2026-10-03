@@ -46,6 +46,24 @@ public class Feed {
     @Column(nullable = false)
     private boolean enabled;
 
+    @Column
+    private @Nullable String etag;
+
+    @Column(name = "last_modified")
+    private @Nullable String lastModified;
+
+    @Column(name = "last_fetched_at")
+    private @Nullable Instant lastFetchedAt;
+
+    @Column(name = "last_success_at")
+    private @Nullable Instant lastSuccessAt;
+
+    @Column(name = "last_error")
+    private @Nullable String lastError;
+
+    @Column(name = "consecutive_failures", nullable = false)
+    private int consecutiveFailures;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -81,6 +99,30 @@ public class Feed {
 
     public boolean isEnabled() {
         return enabled;
+    }
+
+    public @Nullable String getEtag() {
+        return etag;
+    }
+
+    public @Nullable String getLastModified() {
+        return lastModified;
+    }
+
+    public @Nullable Instant getLastFetchedAt() {
+        return lastFetchedAt;
+    }
+
+    public @Nullable Instant getLastSuccessAt() {
+        return lastSuccessAt;
+    }
+
+    public @Nullable String getLastError() {
+        return lastError;
+    }
+
+    public int getConsecutiveFailures() {
+        return consecutiveFailures;
     }
 
     public Instant getCreatedAt() {

@@ -1,0 +1,57 @@
+databaseChangeLog:
+  - changeSet:
+      id: 06-add-feed-health
+      author: argus
+      changes:
+        - addColumn:
+            tableName: feed
+            columns:
+              - column:
+                  name: etag
+                  type: text
+              - column:
+                  name: last_modified
+                  type: text
+              - column:
+                  name: last_fetched_at
+                  type: timestamp with time zone
+              - column:
+                  name: last_success_at
+                  type: timestamp with time zone
+              - column:
+                  name: last_error
+                  type: text
+              - column:
+                  name: consecutive_failures
+                  type: integer
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+        - createIndex:
+            indexName: ix_feed_enabled
+            tableName: feed
+            columns:
+              - column:
+                  name: enabled
+      rollback:
+        - dropIndex:
+            indexName: ix_feed_enabled
+            tableName: feed
+        - dropColumn:
+            tableName: feed
+            columnName: etag
+        - dropColumn:
+            tableName: feed
+            columnName: last_modified
+        - dropColumn:
+            tableName: feed
+            columnName: last_fetched_at
+        - dropColumn:
+            tableName: feed
+            columnName: last_success_at
+        - dropColumn:
+            tableName: feed
+            columnName: last_error
+        - dropColumn:
+            tableName: feed
+            columnName: consecutive_failures

@@ -55,8 +55,8 @@ class ArgusDashboardTest {
                 .toList();
 
         assertThat(rows).containsExactly(
-                "Overview", "Ingestion pipeline", "Data quality", "API & HTTP", "JVM & runtime",
-                "PostgreSQL & HikariCP", "Container", "Traces", "Logs");
+                "Overview", "Polling", "Feed health", "Ingestion pipeline", "Data quality", "Scheduled jobs",
+                "API & HTTP", "JVM & runtime", "PostgreSQL & HikariCP", "Container", "Traces", "Logs");
     }
 
     @Test
@@ -110,5 +110,48 @@ class ArgusDashboardTest {
                 .toList();
 
         assertThat(lokiQueries).isNotEmpty().allSatisfy(query -> assertThat(query).contains("{service=\"argus\""));
+    }
+
+    private static JsonNode panel(int id) {
+        return StreamSupport.stream(dashboard.path("panels").spliterator(), false)
+                .filter(panel -> panel.path("id").asInt() == id)
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private static String expr(JsonNode panel, int target) {
+        return panel.path("targets").path(target).path("expr").asString();
+    }
+
+    @Test
+    void lastPollAgeIsEmptyUntilThePollGaugeIsPositive() {
+        JsonNode lastPollAge = panel(40);
+
+        assertThat(expr(lastPollAge, 0)).isEqualTo("time() - (max(argus_poll_last_success_seconds{job=\"argus\"}) > 0)");
+        assertThat(lastPollAge.path("fieldConfig").path("defaults").path("noValue").asString()).isEqualTo("never");
+        assertThat(lastPollAge.path("description").asString()).contains("even if some feeds failed");
+    }
+
+    @Test
+    void feedHealthTableJoinsItsInstantQueriesOnFeedIdAndMapsMinusOneToNever() {
+        JsonNode table = panel(49);
+
+        assertThat(table.path("targets")).hasSize(3).allSatisfy(target ->
+                assertThat(target.path("instant").asBoolean()).isTrue());
+        assertThat(table.path("transformations").path(0).path("id").asString()).isEqualTo("joinByField");
+        assertThat(table.path("transformations").path(0).path("options").path("byField").asString())
+                .isEqualTo("feed_id");
+        assertThat(table.path("fieldConfig").path("overrides").toString())
+                .contains("\"-1\":{\"text\":\"never\"");
+    }
+
+    @Test
+    void stalestFeedsPutsNeverSucceededFeedsFirst() {
+        JsonNode stalest = panel(50);
+
+        assertThat(expr(stalest, 0)).contains("== -1) * 0 + 1e12");
+        assertThat(stalest.path("fieldConfig").path("defaults").path("mappings").toString())
+                .contains("\"1000000000000\":{\"text\":\"never\"");
+        assertThat(stalest.path("description").asString()).contains("never succeeded");
     }
 }

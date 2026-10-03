@@ -150,4 +150,14 @@ class GlobalExceptionHandlerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
     }
+
+    @Test
+    void invocationRejectedIsConflictWithPollInProgressCode() throws Exception {
+        mockMvc.perform(get(PROBE + "/rejected"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("POLL_IN_PROGRESS"))
+                .andExpect(jsonPath("$.type").value("urn:argus:problem:poll-in-progress"))
+                .andExpect(jsonPath("$.title").value("Poll already in progress"))
+                .andExpect(jsonPath("$.detail").value("A poll is already in progress."));
+    }
 }

@@ -1,6 +1,7 @@
 package com.j11a.argus.feed.fetch;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.j11a.argus.feed.fetch.FetchResult.Failed;
 import com.j11a.argus.feed.fetch.FetchResult.Fetched;
@@ -21,6 +22,9 @@ import org.springframework.util.unit.DataSize;
 import org.springframework.web.client.RestClient;
 
 class FeedFetcherTest {
+
+    private static final FetchProperties.Retry RETRY =
+            new FetchProperties.Retry(2, Duration.ofSeconds(1), 2.0, Duration.ofSeconds(25));
 
     private static final String USER_AGENT = "Argus-Test/1.0 (fetcher test)";
     private static final String RSS = "application/rss+xml; charset=utf-8";
@@ -47,7 +51,7 @@ class FeedFetcherTest {
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
         factory.setReadTimeout(READ_TIMEOUT);
         return new FeedFetcher(RestClient.builder().requestFactory(factory),
-                new FetchProperties(USER_AGENT, MAX_BODY, maxRedirects));
+                new FetchProperties(USER_AGENT, MAX_BODY, maxRedirects, RETRY));
     }
 
     private FetchResult fetch(String path) {
@@ -69,7 +73,92 @@ class FeedFetcherTest {
             assertThat(fetched.contentType()).isEqualTo(RSS);
             assertThat(fetched.finalUrl()).isEqualTo(URI.create(server.baseUrl() + "/feed"));
             assertThat(fetched.permanentTarget()).isNull();
+            assertThat(fetched.validators()).isEqualTo(FetchValidators.EMPTY);
         });
+    }
+
+    @Test
+    void capturesValidatorsFromResponseHeadersOn200() {
+        server.serve("/feed", 200, RSS, FeedStubServer.utf8("<rss/>"),
+                Map.of("ETag", "\"abc\"", "Last-Modified", "Wed, 21 Oct 2026 07:28:00 GMT"));
+
+        FetchResult result = fetch("/feed");
+
+        assertThat(result).isInstanceOfSatisfying(Fetched.class, fetched -> {
+            assertThat(fetched.validators().etag()).isEqualTo("\"abc\"");
+            assertThat(fetched.validators().lastModified()).isEqualTo("Wed, 21 Oct 2026 07:28:00 GMT");
+        });
+    }
+
+    @Test
+    void status304ReturnsNotModifiedWithValidators() {
+        server.serve("/feed", 304, null, new byte[0],
+                Map.of("ETag", "\"etag-304\"", "Last-Modified", "Thu, 22 Oct 2026 08:00:00 GMT"));
+
+        FetchResult result = fetcher(5).fetch(URI.create(server.baseUrl() + "/feed"),
+                new FetchValidators("\"etag-304\"", "Thu, 22 Oct 2026 08:00:00 GMT"));
+
+        assertThat(result).isInstanceOfSatisfying(FetchResult.NotModified.class, notModified -> {
+            assertThat(notModified.finalUrl()).isEqualTo(URI.create(server.baseUrl() + "/feed"));
+            assertThat(notModified.permanentTarget()).isNull();
+            assertThat(notModified.validators().etag()).isEqualTo("\"etag-304\"");
+            assertThat(notModified.validators().lastModified()).isEqualTo("Thu, 22 Oct 2026 08:00:00 GMT");
+        });
+    }
+
+    @Test
+    void sendsTheStoredValidatorsOnEveryHop() {
+        server.redirect("/old", 302, "/new")
+                .serve("/new", 200, RSS, FeedStubServer.utf8("<rss/>"));
+
+        fetcher(5).fetch(URI.create(server.baseUrl() + "/old"),
+                new FetchValidators("\"old-etag\"", "Tue, 20 Oct 2026 00:00:00 GMT"));
+
+        for (String path : new String[] {"/old", "/new"}) {
+            FeedStubServer.Request hop = server.requestsTo(path).get(0);
+            assertThat(hop.header("If-None-Match")).isEqualTo("\"old-etag\"");
+            assertThat(hop.header("If-Modified-Since")).isEqualTo("Tue, 20 Oct 2026 00:00:00 GMT");
+            assertThat(hop.header("User-Agent")).isEqualTo(USER_AGENT);
+        }
+    }
+
+    @Test
+    void aPermanentRedirectThatThenAnswers304IsNotModifiedWithThePermanentTarget() {
+        FetchValidators stored = new FetchValidators("\"v1\"", null);
+        server.redirect("/feed", 301, "/final")
+                .serve("/final", 304, null, new byte[0], Map.of("ETag", "\"v1\""));
+
+        FetchResult result = fetcher(5).fetch(URI.create(server.baseUrl() + "/feed"), stored);
+
+        assertThat(server.requestsTo("/final").get(0).header("If-None-Match")).isEqualTo("\"v1\"");
+        assertThat(result).isInstanceOfSatisfying(FetchResult.NotModified.class, notModified -> {
+            assertThat(notModified.finalUrl()).isEqualTo(URI.create(server.baseUrl() + "/final"));
+            assertThat(notModified.permanentTarget()).isEqualTo(URI.create(server.baseUrl() + "/final"));
+        });
+    }
+
+    @Test
+    void a304ToARequestThatSentNoValidatorsIsAnHttpStatusFailure() {
+        server.serve("/feed", 304, null, new byte[0]);
+
+        assertFailed(fetch("/feed"), FetchFailureReason.HTTP_STATUS, 304);
+    }
+
+    @Test
+    void retryableFetchThrowsForAServerErrorAndForATransientIoFailure() throws IOException {
+        server.serve("/down", 503, "text/plain", FeedStubServer.utf8("unavailable"));
+        FeedFetcher fetcher = fetcher(5);
+        URI down = URI.create(server.baseUrl() + "/down");
+        URI refused = URI.create(deadBaseUrl() + "/feed");
+
+        assertThatThrownBy(() -> fetcher.fetchRetryable(down, FetchValidators.EMPTY))
+                .isInstanceOfSatisfying(RetryableFetchException.class, e -> {
+                    assertThat(e.reason()).isEqualTo(FetchFailureReason.HTTP_STATUS);
+                    assertThat(e.status()).isEqualTo(503);
+                });
+        assertThatThrownBy(() -> fetcher.fetchRetryable(refused, FetchValidators.EMPTY))
+                .isInstanceOfSatisfying(RetryableFetchException.class,
+                        e -> assertThat(e.toFailedResult()).isEqualTo(new Failed(FetchFailureReason.IO, null)));
     }
 
     @Test
@@ -144,14 +233,15 @@ class FeedFetcherTest {
         assertFailed(fetch("/silent"), FetchFailureReason.TIMEOUT, null);
     }
 
+    private static String deadBaseUrl() throws IOException {
+        try (FeedStubServer closed = new FeedStubServer()) {
+            return closed.baseUrl();
+        }
+    }
+
     @Test
     void connectionRefusedIsAnIoFailure() throws IOException {
-        String deadUrl;
-        try (FeedStubServer closed = new FeedStubServer()) {
-            deadUrl = closed.baseUrl();
-        }
-
-        FetchResult result = fetcher(5).fetch(URI.create(deadUrl + "/feed"));
+        FetchResult result = fetcher(5).fetch(URI.create(deadBaseUrl() + "/feed"));
 
         assertFailed(result, FetchFailureReason.IO, null);
     }

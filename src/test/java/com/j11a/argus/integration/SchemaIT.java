@@ -111,4 +111,27 @@ class SchemaIT extends AbstractIntegrationTest {
 
         assertThat(type).isEqualTo("timestamp with time zone");
     }
+
+    @Test
+    void feedHealthColumnsAndIndexExist() {
+        long source = insertSource("example.test");
+        long feed = insertFeed(source, "https://example.test/rss");
+
+        var row = jdbcClient.sql("""
+                        SELECT etag, last_modified, last_fetched_at, last_success_at, last_error, consecutive_failures
+                        FROM feed WHERE id = :id""")
+                .param("id", feed)
+                .query()
+                .singleRow();
+
+        assertThat(row).containsEntry("consecutive_failures", 0);
+        assertThat(row.get("etag")).isNull();
+        assertThat(row.get("last_modified")).isNull();
+
+        long indexCount = jdbcClient.sql("""
+                        SELECT count(*) FROM pg_indexes
+                        WHERE tablename = 'feed' AND indexname = 'ix_feed_enabled'""")
+                .query(Long.class).single();
+        assertThat(indexCount).isOne();
+    }
 }

@@ -7,6 +7,13 @@ spring:
 argus:
   admin:
     key: integration-test-admin-key-0123456789abcdef
+  fetch:
+    retry:
+      # Keeps the back-off of ITs that exercise failing feeds short; max-retries stays at its default of 2.
+      delay: 10ms
+  poll:
+    cron: "-"
+    concurrency: 2
 
 management:
   opentelemetry:

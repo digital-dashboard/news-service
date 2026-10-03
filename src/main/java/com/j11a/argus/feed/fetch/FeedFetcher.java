@@ -2,6 +2,7 @@ package com.j11a.argus.feed.fetch;
 
 import com.j11a.argus.feed.fetch.FetchResult.Failed;
 import com.j11a.argus.feed.fetch.FetchResult.Fetched;
+import com.j11a.argus.feed.fetch.FetchResult.NotModified;
 import com.j11a.argus.url.HttpUrls;
 import java.io.IOException;
 import java.io.InputStream;
@@ -39,14 +40,19 @@ public class FeedFetcher {
     private record Rejected(Failed failure) implements Step {
     }
 
+    private record NotModifiedStep(FetchValidators validators) implements Step {
+    }
+
     private static final class Body implements Step {
 
         private final byte[] bytes;
         private final @Nullable String contentType;
+        private final FetchValidators validators;
 
-        private Body(byte[] bytes, @Nullable String contentType) {
+        private Body(byte[] bytes, @Nullable String contentType, FetchValidators validators) {
             this.bytes = bytes;
             this.contentType = contentType;
+            this.validators = validators;
         }
     }
 
@@ -68,16 +74,32 @@ public class FeedFetcher {
     }
 
     public FetchResult fetch(URI url) {
+        return fetch(url, FetchValidators.EMPTY);
+    }
+
+    public FetchResult fetch(URI url, FetchValidators validators) {
+        return doFetch(url, validators, false);
+    }
+
+    /** Throws RetryableFetchException on 5xx and transient I/O, for a RetryTemplate to catch. */
+    public FetchResult fetchRetryable(URI url, FetchValidators validators) {
+        return doFetch(url, validators, true);
+    }
+
+    private FetchResult doFetch(URI url, FetchValidators validators, boolean throwOnTransient) {
         URI current = url;
         URI permanentTarget = null;
         boolean permanentChain = true;
         for (int redirects = 0; ; redirects++) {
-            Step step = attempt(current);
+            Step step = attempt(current, validators, throwOnTransient);
             if (step instanceof Rejected(var rejection)) {
                 return rejection;
             }
+            if (step instanceof NotModifiedStep(var notModifiedValidators)) {
+                return new NotModified(current, permanentTarget, notModifiedValidators);
+            }
             if (step instanceof Body body) {
-                return new Fetched(body.bytes, body.contentType, current, permanentTarget);
+                return new Fetched(body.bytes, body.contentType, current, permanentTarget, body.validators);
             }
             Hop hop = nextHop(current, (Redirect) step, redirects);
             if (hop instanceof Stop(var stopped)) {
@@ -92,14 +114,19 @@ public class FeedFetcher {
         }
     }
 
-    private Step attempt(URI current) {
+    private Step attempt(URI current, FetchValidators validators, boolean throwOnTransient) {
         if (!HttpUrls.isHttp(current) || HttpUrls.hasUserInfo(current)) {
             return new Rejected(new Failed(FetchFailureReason.INVALID_URL, null));
         }
         try {
-            return request(current);
+            return request(current, validators, throwOnTransient);
         } catch (RestClientException e) {
-            return new Rejected(new Failed(classify(e), null));
+            // classify only ever answers TIMEOUT or IO, and both are transient.
+            FetchFailureReason reason = classify(e);
+            if (throwOnTransient) {
+                throw new RetryableFetchException(reason, null);
+            }
+            return new Rejected(new Failed(reason, null));
         }
     }
 
@@ -115,19 +142,44 @@ public class FeedFetcher {
                 .orElseGet(() -> new Stop(new Failed(FetchFailureReason.INVALID_URL, null)));
     }
 
-    private Step request(URI url) {
+    private Step request(URI url, FetchValidators validators, boolean throwOnTransient) {
         return client.get()
                 .uri(url)
                 .header(HttpHeaders.USER_AGENT, properties.userAgent())
                 .header(HttpHeaders.ACCEPT, ACCEPT)
-                .exchange((request, response) -> handle(response), true);
+                .headers(headers -> applyValidators(headers, validators))
+                .exchange((request, response) -> handle(response, validators, throwOnTransient), true);
     }
 
-    private Step handle(ClientHttpResponse response) throws IOException {
+    private static void applyValidators(HttpHeaders headers, FetchValidators validators) {
+        if (validators.etag() != null) {
+            headers.set(HttpHeaders.IF_NONE_MATCH, validators.etag());
+        }
+        if (validators.lastModified() != null) {
+            headers.set(HttpHeaders.IF_MODIFIED_SINCE, validators.lastModified());
+        }
+    }
+
+    private Step handle(ClientHttpResponse response, FetchValidators sent, boolean throwOnTransient)
+            throws IOException {
         HttpStatusCode status = response.getStatusCode();
         int code = status.value();
+        if (code == 304) {
+            if (sent.isEmpty()) {
+                return new Rejected(new Failed(FetchFailureReason.HTTP_STATUS, code));
+            }
+            String etag = response.getHeaders().getFirst(HttpHeaders.ETAG);
+            String lastModified = response.getHeaders().getFirst(HttpHeaders.LAST_MODIFIED);
+            return new NotModifiedStep(new FetchValidators(etag, lastModified));
+        }
         if (REDIRECT_STATUSES.contains(code)) {
             return new Redirect(code, response.getHeaders().getFirst(HttpHeaders.LOCATION));
+        }
+        if (status.is5xxServerError()) {
+            if (throwOnTransient) {
+                throw new RetryableFetchException(FetchFailureReason.HTTP_STATUS, code);
+            }
+            return new Rejected(new Failed(FetchFailureReason.HTTP_STATUS, code));
         }
         if (!status.is2xxSuccessful()) {
             return new Rejected(new Failed(FetchFailureReason.HTTP_STATUS, code));
@@ -140,7 +192,10 @@ public class FeedFetcher {
         if (body.length > maxBytes) {
             return new Rejected(new Failed(FetchFailureReason.TOO_LARGE, null));
         }
-        return new Body(body, response.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE));
+        String etag = response.getHeaders().getFirst(HttpHeaders.ETAG);
+        String lastModified = response.getHeaders().getFirst(HttpHeaders.LAST_MODIFIED);
+        return new Body(body, response.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE),
+                new FetchValidators(etag, lastModified));
     }
 
     private static byte[] readCapped(ClientHttpResponse response, int limit) throws IOException {

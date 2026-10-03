@@ -1,9 +1,14 @@
 package com.j11a.argus.feed.api;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -11,6 +16,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.j11a.argus.config.WebMvcConfig;
 import com.j11a.argus.feed.Topic;
+import com.j11a.argus.feed.health.FeedState;
+import com.j11a.argus.feed.poll.AggregatePollReport;
+import com.j11a.argus.feed.poll.FeedPoller;
+import com.j11a.argus.feed.poll.PollInterruptedException;
+import com.j11a.argus.feed.poll.PollTrigger;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.IngestReport;
 import com.j11a.argus.security.SecurityConfig;
@@ -20,12 +30,20 @@ import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import com.j11a.argus.web.error.GlobalExceptionHandler;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
+import org.springframework.resilience.InvocationRejectedException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -46,6 +64,9 @@ class FeedControllerTest {
     @MockitoBean
     private FeedIngestService ingest;
 
+    @MockitoBean
+    private FeedPoller poller;
+
     private static MockHttpServletRequestBuilder adminPost(String path, String body) {
         return post(path).header(AdminKeys.HEADER, AdminKeys.VALID).contentType(MediaType.APPLICATION_JSON)
                 .content(body);
@@ -54,7 +75,7 @@ class FeedControllerTest {
     private static FeedResponse feed(long id) {
         return new FeedResponse(id, "Example", "https://example.test/rss.xml", "https://example.test", Topic.TECH,
                 true, new SourceSummary(3, "example.test", "https://example.test", null),
-                Instant.parse("2026-10-02T10:00:00Z"));
+                Instant.parse("2026-10-02T10:00:00Z"), null, null, null, 0, FeedState.HEALTHY);
     }
 
     @Test
@@ -214,5 +235,158 @@ class FeedControllerTest {
         mockMvc.perform(post(FEEDS + "/42/refresh"))
                 .andExpect(status().isUnauthorized());
         verifyNoInteractions(ingest);
+    }
+
+    @Test
+    void listReturnsPagedShapeWithHealth() throws Exception {
+        when(feeds.list(0, 20)).thenReturn(new PageImpl<>(List.of(feed(42)), PageRequest.of(0, 20), 1));
+
+        mockMvc.perform(get(FEEDS))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(42))
+                .andExpect(jsonPath("$.content[0].state").value("healthy"))
+                .andExpect(jsonPath("$.content[0].consecutiveFailures").value(0))
+                .andExpect(jsonPath("$.page.totalElements").value(1))
+                .andExpect(jsonPath("$.page.size").value(20));
+    }
+
+    @Test
+    void listOffsetBeyondIntRangeIsRejected() throws Exception {
+        mockMvc.perform(get(FEEDS).param("page", "100000000").param("size", "100"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[0].field").value("page"));
+        verifyNoInteractions(feeds);
+    }
+
+    static Stream<Arguments> badPaging() {
+        return Stream.of(
+                Arguments.of("size", "101"),
+                Arguments.of("size", "0"),
+                Arguments.of("page", "-1"),
+                Arguments.of("size", "abc"));
+    }
+
+    @ParameterizedTest(name = "{0}={1} is 400 VALIDATION_FAILED")
+    @MethodSource("badPaging")
+    void listBadPagingIsRejected(String name, String value) throws Exception {
+        mockMvc.perform(get(FEEDS).param(name, value))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[0].field").value(name));
+        verifyNoInteractions(feeds);
+    }
+
+    @Test
+    void refreshAllRequiresAdminKey() throws Exception {
+        mockMvc.perform(post(FEEDS + "/refresh"))
+                .andExpect(status().isUnauthorized());
+        verifyNoInteractions(poller);
+    }
+
+    @Test
+    void refreshAllCallsPollerAndReturnsAggregateReport() throws Exception {
+        AggregatePollReport report = new AggregatePollReport(
+                "poll-1", PollTrigger.MANUAL, 250, 2, 2, 0, 0, 10, 5, 5, 0, List.of());
+        when(poller.poll(PollTrigger.MANUAL)).thenReturn(report);
+
+        mockMvc.perform(post(FEEDS + "/refresh").header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pollId").value("poll-1"))
+                .andExpect(jsonPath("$.trigger").value("manual"))
+                .andExpect(jsonPath("$.durationMs").value(250))
+                .andExpect(jsonPath("$.feedsPolled").value(2))
+                .andExpect(jsonPath("$.succeeded").value(2));
+    }
+
+    @Test
+    void refreshAllWhenPollInProgressReturns409() throws Exception {
+        when(poller.poll(PollTrigger.MANUAL)).thenThrow(
+                new InvocationRejectedException("running", poller));
+
+        mockMvc.perform(post(FEEDS + "/refresh").header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("POLL_IN_PROGRESS"))
+                .andExpect(jsonPath("$.type").value("urn:argus:problem:poll-in-progress"));
+    }
+
+    @Test
+    void refreshAllInterruptedByShutdownReturns503() throws Exception {
+        when(poller.poll(PollTrigger.MANUAL)).thenThrow(new PollInterruptedException(new InterruptedException()));
+
+        mockMvc.perform(post(FEEDS + "/refresh").header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("SERVICE_UNAVAILABLE"));
+    }
+
+    @Test
+    void patchRequiresAdminKey() throws Exception {
+        mockMvc.perform(patch(FEEDS + "/42")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":false}"))
+                .andExpect(status().isUnauthorized());
+        verifyNoInteractions(feeds);
+    }
+
+    @Test
+    void patchNullOrEmptyBodyIs400() throws Exception {
+        mockMvc.perform(patch(FEEDS + "/42").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        mockMvc.perform(patch(FEEDS + "/42").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content(""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+        verifyNoInteractions(feeds);
+    }
+
+    @Test
+    void patchUnknownFeedIs404() throws Exception {
+        when(feeds.patch(eq(7L), any())).thenThrow(new ApiException(ErrorCode.FEED_NOT_FOUND, "no feed"));
+
+        mockMvc.perform(patch(FEEDS + "/7").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("FEED_NOT_FOUND"));
+    }
+
+    @Test
+    void patchEnablesOrDisablesFeedAndReturnsUpdatedFeed() throws Exception {
+        FeedResponse updated = new FeedResponse(42, "Example", "https://example.test/rss.xml", null, Topic.TECH,
+                false, new SourceSummary(3, "example.test", "https://example.test", null),
+                Instant.parse("2026-10-02T10:00:00Z"), null, null, null, 0, FeedState.DISABLED);
+        when(feeds.patch(eq(42L), any())).thenReturn(updated);
+
+        mockMvc.perform(patch(FEEDS + "/42").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(false))
+                .andExpect(jsonPath("$.state").value("disabled"));
+    }
+
+    @Test
+    void deleteRequiresAdminKey() throws Exception {
+        mockMvc.perform(delete(FEEDS + "/42"))
+                .andExpect(status().isUnauthorized());
+        verifyNoInteractions(feeds);
+    }
+
+    @Test
+    void deleteUnknownFeedIs404() throws Exception {
+        doThrow(new ApiException(ErrorCode.FEED_NOT_FOUND, "no feed")).when(feeds).delete(7L);
+
+        mockMvc.perform(delete(FEEDS + "/7").header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("FEED_NOT_FOUND"));
+    }
+
+    @Test
+    void deleteSuccessIs204() throws Exception {
+        mockMvc.perform(delete(FEEDS + "/42").header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isNoContent());
+
+        verify(feeds).delete(42L);
     }
 }

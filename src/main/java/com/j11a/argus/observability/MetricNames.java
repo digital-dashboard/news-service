@@ -11,6 +11,13 @@ public final class MetricNames {
     public static final String FETCH_SIZE = "argus.fetch.size";
     public static final String INGEST_ENTRIES = "argus.ingest.entries";
     public static final String PARSE_MISSING = "argus.parse.missing";
+    public static final String FETCH_RETRY = "argus.fetch.retry";
+    public static final String FEED_STATE = "argus.feed.state";
+    public static final String FEED_CONSECUTIVE_FAILURES = "argus.feed.consecutive.failures";
+    public static final String FEED_SINCE_LAST_SUCCESS = "argus.feed.since.last.success";
+    public static final String POLL = "argus.poll";
+    public static final String POLL_LAST_SUCCESS = "argus.poll.last.success";
+    public static final String SCHEDULED_JOB = "argus.scheduled.job";
 
     private MetricNames() {
     }

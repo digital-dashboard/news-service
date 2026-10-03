@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.resilience.InvocationRejectedException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
@@ -42,6 +43,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         ProblemDetail problem = Problems.of(ex.code(), ex.getMessage());
         ex.properties().forEach(problem::setProperty);
         return ResponseEntity.status(ex.code().status()).body(problem);
+    }
+
+    @ExceptionHandler(InvocationRejectedException.class)
+    ResponseEntity<ProblemDetail> handleInvocationRejected(InvocationRejectedException ex) {
+        return Problems.response(ErrorCode.POLL_IN_PROGRESS, "A poll is already in progress.");
     }
 
     /** Spring Security's ExceptionTranslationFilter owns these; the catch-all below would turn them into a 500. */

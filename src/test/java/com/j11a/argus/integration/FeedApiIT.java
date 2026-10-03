@@ -1,16 +1,26 @@
 package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.matchesPattern;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.j11a.argus.feed.health.FeedHealthUpdater;
+import com.j11a.argus.observability.MetricNames;
 import com.j11a.argus.testsupport.AdminKeys;
 import com.j11a.argus.testsupport.Fixtures;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 import tools.jackson.databind.json.JsonMapper;
@@ -22,6 +32,12 @@ class FeedApiIT extends AbstractIntegrationTest {
     private static final String RSS = "application/rss+xml";
 
     private final JsonMapper mapper = JsonMapper.builder().build();
+
+    @Autowired
+    private MeterRegistry meterRegistry;
+
+    @Autowired
+    private FeedHealthUpdater healthUpdater;
 
     private ResultActions createFeed(String path, String topic) throws Exception {
         return mockMvc.perform(post(FEEDS).header(AdminKeys.HEADER, AdminKeys.VALID)
@@ -49,7 +65,7 @@ class FeedApiIT extends AbstractIntegrationTest {
 
         String body = createFeed("/api/ok.xml", "WORLD")
                 .andExpect(status().isCreated())
-                .andExpect(header().string("Location", org.hamcrest.Matchers.matchesPattern("/news/v2/feeds/\\d+")))
+                .andExpect(header().string("Location", matchesPattern("/news/v2/feeds/\\d+")))
                 .andExpect(jsonPath("$.name").value("Harbour Times - World"))
                 .andExpect(jsonPath("$.topic").value("WORLD"))
                 .andExpect(jsonPath("$.source.name").value("news.example.test"))
@@ -269,5 +285,268 @@ class FeedApiIT extends AbstractIntegrationTest {
         createFeed("/api/guarded.xml?token=abc", "WORLD")
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.url").value(stub.baseUrl() + "/api/guarded.xml?token=abc"));
+    }
+
+    @Test
+    void listFeedsWithoutKeyRedactsUrlsAndIncludesHealth() throws Exception {
+        stub.serveFixture("/api/list1.xml", "bbc-like-rss2.xml");
+        createFeed("/api/list1.xml?token=secret", "WORLD").andExpect(status().isCreated());
+
+        mockMvc.perform(get(FEEDS))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].url").value(stub.baseUrl() + "/api/list1.xml"))
+                .andExpect(jsonPath("$.content[0].state").value("healthy"))
+                .andExpect(jsonPath("$.content[0].consecutiveFailures").value(0))
+                .andExpect(jsonPath("$.page.size").value(20))
+                .andExpect(jsonPath("$.page.number").value(0))
+                .andExpect(jsonPath("$.page.totalElements").value(1));
+    }
+
+    @Test
+    void listFeedsWithKeyShowsFullUrls() throws Exception {
+        stub.serveFixture("/api/list2.xml", "bbc-like-rss2.xml");
+        createFeed("/api/list2.xml?token=secret", "WORLD").andExpect(status().isCreated());
+
+        mockMvc.perform(get(FEEDS).header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].url").value(stub.baseUrl() + "/api/list2.xml?token=secret"));
+    }
+
+    @Test
+    void listFeedsInvalidPaginationReturnsBadRequest() throws Exception {
+        mockMvc.perform(get(FEEDS).param("page", "-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(get(FEEDS).param("size", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(get(FEEDS).param("size", "101"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(get(FEEDS).param("size", "invalid"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getFeedByIdIncludesHealthFields() throws Exception {
+        stub.serveFixture("/api/health-check.xml", "bbc-like-rss2.xml");
+        long id = mapper.readTree(createFeed("/api/health-check.xml", "WORLD").andReturn().getResponse()
+                .getContentAsString()).path("id").asLong();
+
+        mockMvc.perform(get(FEEDS + "/" + id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id))
+                .andExpect(jsonPath("$.state").value("healthy"))
+                .andExpect(jsonPath("$.consecutiveFailures").value(0))
+                .andExpect(jsonPath("$.lastFetchedAt").isNotEmpty())
+                .andExpect(jsonPath("$.lastSuccessAt").isNotEmpty())
+                .andExpect(jsonPath("$.lastError").doesNotExist());
+    }
+
+    @Test
+    void patchRequiresAdminKey() throws Exception {
+        mockMvc.perform(patch(FEEDS + "/1").contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ADMIN_KEY_REQUIRED"));
+    }
+
+    @Test
+    void patchInvalidBodyReturnsBadRequest() throws Exception {
+        mockMvc.perform(patch(FEEDS + "/1").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(patch(FEEDS + "/1").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":null}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void patchUnknownFeedReturnsNotFound() throws Exception {
+        mockMvc.perform(patch(FEEDS + "/99999").header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("FEED_NOT_FOUND"));
+    }
+
+    @Test
+    void patchUpdatesEnabledState() throws Exception {
+        stub.serveFixture("/api/patch.xml", "bbc-like-rss2.xml");
+        long id = mapper.readTree(createFeed("/api/patch.xml", "WORLD").andReturn().getResponse()
+                .getContentAsString()).path("id").asLong();
+
+        mockMvc.perform(patch(FEEDS + "/" + id).header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(false))
+                .andExpect(jsonPath("$.state").value("disabled"));
+
+        mockMvc.perform(patch(FEEDS + "/" + id).header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(true))
+                .andExpect(jsonPath("$.state").value("healthy"));
+    }
+
+    @Test
+    void deleteRequiresAdminKey() throws Exception {
+        mockMvc.perform(delete(FEEDS + "/1"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ADMIN_KEY_REQUIRED"));
+    }
+
+    @Test
+    void deleteUnknownFeedReturnsNotFound() throws Exception {
+        mockMvc.perform(delete(FEEDS + "/99999").header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("FEED_NOT_FOUND"));
+    }
+
+    @Test
+    void deleteRemovesOrphanArticlesOnlyAndPreservesSharedArticles() throws Exception {
+        stub.serve("/api/del1.xml", 200, RSS, rss("https://del.example.test",
+                item("shared", "Wed, 01 Jan 2025 10:00:00 GMT"),
+                item("orphan-1", "Tue, 01 Jan 2024 10:00:00 GMT")).getBytes(StandardCharsets.UTF_8));
+        stub.serve("/api/del2.xml", 200, RSS, rss("https://del.example.test",
+                item("shared", "Wed, 01 Jan 2025 10:00:00 GMT"),
+                item("other-2", "Mon, 01 Jan 2024 10:00:00 GMT")).getBytes(StandardCharsets.UTF_8));
+
+        long feed1 = mapper.readTree(createFeed("/api/del1.xml", "NEWS").andReturn().getResponse()
+                .getContentAsString()).path("id").asLong();
+        long feed2 = mapper.readTree(createFeed("/api/del2.xml", "NEWS").andReturn().getResponse()
+                .getContentAsString()).path("id").asLong();
+
+        assertThat(jdbcClient.sql("SELECT count(*) FROM feed").query(Long.class).single()).isEqualTo(2);
+        assertThat(jdbcClient.sql("SELECT count(*) FROM article").query(Long.class).single()).isEqualTo(3);
+
+        mockMvc.perform(delete(FEEDS + "/" + feed1).header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isNoContent());
+
+        assertThat(jdbcClient.sql("SELECT count(*) FROM feed WHERE id = :id").param("id", feed1).query(Long.class).single())
+                .isZero();
+        assertThat(jdbcClient.sql("SELECT count(*) FROM feed WHERE id = :id").param("id", feed2).query(Long.class).single())
+                .isOne();
+
+        List<String> remainingTitles = jdbcClient.sql("SELECT title FROM article ORDER BY title").query(String.class).list();
+        assertThat(remainingTitles).containsExactly("other-2", "shared");
+    }
+
+    private long createdFeedId(String path) throws Exception {
+        return mapper.readTree(createFeed(path, "NEWS").andReturn().getResponse().getContentAsString())
+                .path("id").asLong();
+    }
+
+    private void patchEnabled(long id, boolean enabled) throws Exception {
+        mockMvc.perform(patch(FEEDS + "/" + id).header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":" + enabled + "}"))
+                .andExpect(status().isOk());
+    }
+
+    private Gauge stateGauge(long feedId, String state) {
+        return meterRegistry.find(MetricNames.FEED_STATE)
+                .tag(MetricNames.Tags.FEED_ID, String.valueOf(feedId))
+                .tag(MetricNames.Tags.STATE, state)
+                .gauge();
+    }
+
+    @Test
+    void patchReplacesTheHealthyStateGaugeWithTheDisabledOneAndBack() throws Exception {
+        stub.serveFixture("/api/gauge.xml", "bbc-like-rss2.xml");
+        long id = createdFeedId("/api/gauge.xml");
+        assertThat(stateGauge(id, "healthy")).isNotNull();
+
+        patchEnabled(id, false);
+
+        assertThat(stateGauge(id, "disabled")).isNotNull();
+        assertThat(stateGauge(id, "healthy")).isNull();
+
+        patchEnabled(id, true);
+
+        assertThat(stateGauge(id, "healthy")).isNotNull();
+        assertThat(stateGauge(id, "disabled")).isNull();
+    }
+
+    @Test
+    void patchDoesNotRevertHealthWrittenByAFetchBeforeIt() throws Exception {
+        stub.serveFixture("/api/keep-health.xml", "bbc-like-rss2.xml");
+        long id = createdFeedId("/api/keep-health.xml");
+        healthUpdater.recordFailure(id, "http_status 503", Instant.now());
+        healthUpdater.recordFailure(id, "http_status 503", Instant.now());
+
+        mockMvc.perform(patch(FEEDS + "/" + id).header(AdminKeys.HEADER, AdminKeys.VALID)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.consecutiveFailures").value(2))
+                .andExpect(jsonPath("$.lastError").value("http_status 503"));
+
+        var row = jdbcClient.sql("SELECT consecutive_failures, last_error, enabled FROM feed WHERE id = :id")
+                .param("id", id).query().singleRow();
+        assertThat(row).containsEntry("consecutive_failures", 2)
+                .containsEntry("last_error", "http_status 503")
+                .containsEntry("enabled", false);
+    }
+
+    @Test
+    void deleteRemovesTheFeedsGaugeSeries() throws Exception {
+        stub.serveFixture("/api/gauge-del.xml", "bbc-like-rss2.xml");
+        long id = createdFeedId("/api/gauge-del.xml");
+        assertThat(stateGauge(id, "healthy")).isNotNull();
+
+        mockMvc.perform(delete(FEEDS + "/" + id).header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isNoContent());
+
+        assertThat(meterRegistry.find(MetricNames.FEED_STATE)
+                .tag(MetricNames.Tags.FEED_ID, String.valueOf(id)).gauges()).isEmpty();
+        assertThat(meterRegistry.find(MetricNames.FEED_CONSECUTIVE_FAILURES)
+                .tag(MetricNames.Tags.FEED_ID, String.valueOf(id)).gauges()).isEmpty();
+        assertThat(meterRegistry.find(MetricNames.FEED_SINCE_LAST_SUCCESS)
+                .tag(MetricNames.Tags.FEED_ID, String.valueOf(id)).gauges()).isEmpty();
+    }
+
+    @Test
+    void deleteOfAFeedWithManyArticlesRemovesThemAllAndKeepsTheSharedOnes() throws Exception {
+        int owned = 400;
+        String[] ownedItems = new String[owned + 1];
+        ownedItems[0] = item("shared", "Wed, 01 Jan 2025 10:00:00 GMT");
+        for (int i = 1; i <= owned; i++) {
+            ownedItems[i] = item("owned-" + i, "Tue, 01 Jan 2024 10:00:00 GMT");
+        }
+        stub.serve("/api/many1.xml", 200, RSS, rss("https://many.example.test", ownedItems).getBytes(StandardCharsets.UTF_8));
+        stub.serve("/api/many2.xml", 200, RSS, rss("https://many.example.test",
+                item("shared", "Wed, 01 Jan 2025 10:00:00 GMT")).getBytes(StandardCharsets.UTF_8));
+        long many = createdFeedId("/api/many1.xml");
+        long other = createdFeedId("/api/many2.xml");
+        assertThat(jdbcClient.sql("SELECT count(*) FROM article").query(Long.class).single()).isEqualTo(owned + 1L);
+
+        mockMvc.perform(delete(FEEDS + "/" + many).header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isNoContent());
+
+        assertThat(jdbcClient.sql("SELECT title FROM article").query(String.class).list()).containsExactly("shared");
+        assertThat(jdbcClient.sql("SELECT count(*) FROM article_feed WHERE feed_id = :id").param("id", other)
+                .query(Long.class).single()).isOne();
+    }
+
+    @Test
+    void manualRefreshAllRequiresAdminKey() throws Exception {
+        mockMvc.perform(post(FEEDS + "/refresh"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ADMIN_KEY_REQUIRED"));
+    }
+
+    @Test
+    void manualRefreshAllExecutesAndReturnsAggregateReport() throws Exception {
+        stub.serveFixture("/api/poll-all.xml", "bbc-like-rss2.xml");
+        createFeed("/api/poll-all.xml", "WORLD").andExpect(status().isCreated());
+
+        mockMvc.perform(post(FEEDS + "/refresh").header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.trigger").value("manual"))
+                .andExpect(jsonPath("$.feedsPolled").value(1))
+                .andExpect(jsonPath("$.succeeded").value(1))
+                .andExpect(jsonPath("$.entriesSeen").value(2))
+                .andExpect(jsonPath("$.unchanged").value(2))
+                .andExpect(jsonPath("$.reports.length()").value(1));
     }
 }

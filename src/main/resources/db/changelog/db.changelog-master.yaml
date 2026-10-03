@@ -9,3 +9,5 @@ databaseChangeLog:
       file: classpath:db/changelog/changes/04-create-article.yaml
   - include:
       file: classpath:db/changelog/changes/05-create-article-feed.yaml
+  - include:
+      file: classpath:db/changelog/changes/06-add-feed-health.yaml
