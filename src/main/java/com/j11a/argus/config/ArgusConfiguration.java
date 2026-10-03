@@ -3,6 +3,7 @@ package com.j11a.argus.config;
 import com.j11a.argus.feed.fetch.FetchProperties;
 import com.j11a.argus.feed.parse.FeedParser;
 import com.j11a.argus.feed.poll.PollProperties;
+import com.j11a.argus.ingest.dedup.EntryDedupResolver;
 import io.micrometer.context.ContextRegistry;
 import io.micrometer.context.integration.Slf4jThreadLocalAccessor;
 import java.time.Clock;
@@ -32,6 +33,11 @@ public class ArgusConfiguration {
     @Bean
     FeedParser feedParser() {
         return new FeedParser();
+    }
+
+    @Bean
+    EntryDedupResolver entryDedupResolver() {
+        return new EntryDedupResolver();
     }
 
     @Bean

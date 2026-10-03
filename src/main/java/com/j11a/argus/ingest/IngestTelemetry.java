@@ -9,6 +9,7 @@ import static com.j11a.argus.observability.MetricNames.Tags.SOURCE;
 import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.fetch.FetchResult;
 import com.j11a.argus.feed.parse.ParsedEntry;
+import com.j11a.argus.ingest.dedup.LinkFallback;
 import com.j11a.argus.observability.MetricNames;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -17,6 +18,7 @@ import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
@@ -24,13 +26,17 @@ import java.util.function.Supplier;
 import org.springframework.stereotype.Component;
 
 /**
- * Observations (and so timers) exist only for ingest and fetch. Parse and persist are bare spans, so they add no
- * uncatalogued timers. Feed and source ids are span attributes only, never meter tags; the feed-health gauges, which
- * carry a feed_id tag, are the one exception. The argus.poll timer lives in PollingTelemetry.
+ * Observations (and so timers) exist only for ingest and fetch. Parse, lock wait, resolve and persist are bare spans,
+ * so they add no uncatalogued timers; the lock-wait timer is a plain catalogued Timer. Feed and source ids are span
+ * attributes only, never meter tags; the feed-health gauges, which carry a feed_id tag, are the one exception. The
+ * argus.poll timer lives in PollingTelemetry.
  */
 @Component
 public class IngestTelemetry {
 
+    static final String RESOLVE_SPAN = "argus.resolve";
+    static final String LOCK_WAIT_SPAN = "argus.lock.wait";
+    static final String SOURCE_ID_ATTRIBUTE = "source.id";
     static final String NO_REASON = "none";
     static final String NOT_MODIFIED = "not_modified";
     private static final String UNKNOWN_SOURCE = "unknown";
@@ -41,6 +47,8 @@ public class IngestTelemetry {
     private static final String FETCHED = "fetched";
     private static final String UNEXPECTED_FETCH_REASON = "io";
     private static final String DECISION_INSERTED = "inserted";
+    private static final String DECISION_UPDATED = "updated";
+    private static final String DECISION_LINKED = "linked";
     private static final String DECISION_UNCHANGED = "unchanged";
     private static final String DECISION_SKIPPED = "skipped";
 
@@ -58,7 +66,7 @@ public class IngestTelemetry {
         Observation observation = Observation.createNotStarted(MetricNames.INGEST, observations)
                 .lowCardinalityKeyValue(SOURCE, feed.getSource().getKey())
                 .highCardinalityKeyValue("feed.id", String.valueOf(feed.getId()))
-                .highCardinalityKeyValue("source.id", String.valueOf(feed.getSource().getId()))
+                .highCardinalityKeyValue(SOURCE_ID_ATTRIBUTE, String.valueOf(feed.getSource().getId()))
                 .start();
         String outcome = FAILED;
         try (Observation.Scope ignored = observation.openScope()) {
@@ -154,8 +162,34 @@ public class IngestTelemetry {
         observation.stop();
     }
 
+    Duration lockWait(String sourceKey, long sourceId, Supplier<Duration> acquire) {
+        Span span = tracer.nextSpan().name(LOCK_WAIT_SPAN)
+                .tag(SOURCE_ID_ATTRIBUTE, String.valueOf(sourceId))
+                .start();
+        try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
+            Duration wait = acquire.get();
+            span.tag("contended", String.valueOf(!wait.isZero()));
+            Timer.builder(MetricNames.INGEST_LOCK_WAIT)
+                    .tag(SOURCE, sourceKey)
+                    .register(meters)
+                    .record(wait);
+            return wait;
+        } catch (RuntimeException e) {
+            span.error(e);
+            throw e;
+        } finally {
+            span.end();
+        }
+    }
+
     <T> T span(String name, Supplier<T> work) {
-        Span span = tracer.nextSpan().name(name).start();
+        return span(name, Map.of(), work);
+    }
+
+    <T> T span(String name, Map<String, String> attributes, Supplier<T> work) {
+        Span span = tracer.nextSpan().name(name);
+        attributes.forEach(span::tag);
+        span.start();
         try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
             return work.get();
         } catch (RuntimeException e) {
@@ -173,7 +207,8 @@ public class IngestTelemetry {
         countMissing(sourceKey, "author", entries, e -> e.author() == null);
     }
 
-    private void countMissing(String sourceKey, String kind, List<ParsedEntry> entries, Predicate<ParsedEntry> missing) {
+    private void countMissing(
+            String sourceKey, String kind, List<ParsedEntry> entries, Predicate<ParsedEntry> missing) {
         long count = entries.stream().filter(missing).count();
         if (count > 0) {
             meters.counter(MetricNames.PARSE_MISSING, SOURCE, sourceKey, KIND, kind).increment(count);
@@ -182,6 +217,10 @@ public class IngestTelemetry {
 
     void recordDecisions(String sourceKey, PersistCounts counts) {
         countDecision(sourceKey, DECISION_INSERTED, NO_REASON, counts.inserted());
+        for (Map.Entry<String, Integer> updated : counts.updated().entrySet()) {
+            countDecision(sourceKey, DECISION_UPDATED, updated.getKey(), updated.getValue());
+        }
+        countDecision(sourceKey, DECISION_LINKED, NO_REASON, counts.linked());
         countDecision(sourceKey, DECISION_UNCHANGED, NO_REASON, counts.unchanged());
         for (Map.Entry<String, Integer> skipped : counts.skipped().entrySet()) {
             countDecision(sourceKey, DECISION_SKIPPED, skipped.getKey(), skipped.getValue());
@@ -191,6 +230,15 @@ public class IngestTelemetry {
     private void countDecision(String sourceKey, String decision, String reason, int count) {
         if (count > 0) {
             meters.counter(MetricNames.INGEST_ENTRIES, SOURCE, sourceKey, DECISION, decision, REASON, reason)
+                    .increment(count);
+        }
+    }
+
+    void recordLinkFallbacks(String sourceKey, Map<LinkFallback, Integer> fallbacks) {
+        // Zero increments keep every outcome's series present for the metric catalogue and the dashboard.
+        for (LinkFallback fallback : LinkFallback.values()) {
+            int count = fallbacks.getOrDefault(fallback, 0);
+            meters.counter(MetricNames.INGEST_LINK_FALLBACK, SOURCE, sourceKey, OUTCOME, fallback.tag())
                     .increment(count);
         }
     }

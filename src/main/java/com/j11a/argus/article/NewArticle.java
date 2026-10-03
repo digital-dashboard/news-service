@@ -10,6 +10,7 @@ public record NewArticle(
         @Nullable String rawGuid,
         @Nullable String linkKey,
         @Nullable String link,
+        String contentHash,
         String title,
         String excerpt,
         @Nullable String author,

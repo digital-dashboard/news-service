@@ -13,7 +13,8 @@ class AggregatePollReportTest {
 
     @Test
     void aggregatesCountsCorrectlyAcrossAllOutcomes() {
-        IngestReport completed = IngestReport.completed(1L, 10, new PersistCounts(5, 3, Map.of("missing_key", 2)));
+        IngestReport completed = IngestReport.completed(1L, 10,
+                new PersistCounts(4, Map.of("content_changed", 1), 1, 2, Map.of("missing_key", 2), Map.of()));
         IngestReport notModified = IngestReport.notModified(2L);
         IngestReport failed = IngestReport.failed(3L, "timeout");
 
@@ -31,8 +32,10 @@ class AggregatePollReportTest {
         assertThat(report.notModified()).isEqualTo(1);
         assertThat(report.failed()).isEqualTo(1);
         assertThat(report.entriesSeen()).isEqualTo(10);
-        assertThat(report.inserted()).isEqualTo(5);
-        assertThat(report.unchanged()).isEqualTo(3);
+        assertThat(report.inserted()).isEqualTo(4);
+        assertThat(report.updated()).isEqualTo(1);
+        assertThat(report.linked()).isEqualTo(1);
+        assertThat(report.unchanged()).isEqualTo(2);
         assertThat(report.skipped()).isEqualTo(2);
         assertThat(report.reports()).containsExactly(completed, notModified, failed);
     }

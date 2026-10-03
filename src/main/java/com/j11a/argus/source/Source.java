@@ -11,7 +11,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import org.jspecify.annotations.Nullable;
 
-/** Rows are written by SourceService's upsert; JPA only reads them. */
+/** JPA only reads sources; SourceService (findOrCreate, patch) and the seed changeset write them. */
 @Entity
 @Table(name = "source")
 public class Source {

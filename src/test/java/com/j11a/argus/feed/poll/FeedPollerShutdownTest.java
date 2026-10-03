@@ -113,7 +113,8 @@ class FeedPollerShutdownTest {
         assertThatThrownBy(() -> poll.get(BOUND.toSeconds(), TimeUnit.SECONDS))
                 .isInstanceOf(ExecutionException.class)
                 .hasCauseInstanceOf(PollInterruptedException.class);
-        assertThat(runningWorkers).hasValue(0);
+        // The poll returns as soon as it has cancelled the workers; they unwind on their own threads afterwards.
+        await().atMost(BOUND).untilAsserted(() -> assertThat(runningWorkers).hasValue(0));
         await().atMost(BOUND).untilAsserted(() ->
                 assertThat(ThreadDumps.namesStartingWith(POLL_THREAD_PREFIX)).isEmpty());
         verify(ingestService, never()).refresh(LAST_FEED);

@@ -14,9 +14,10 @@ import com.j11a.argus.ingest.FeedLoader;
 import com.j11a.argus.ingest.IngestTelemetry;
 import com.j11a.argus.security.AdminAccess;
 import com.j11a.argus.source.Source;
+import com.j11a.argus.source.SourceLock;
 import com.j11a.argus.source.SourceResolver;
 import com.j11a.argus.source.SourceService;
-import com.j11a.argus.url.Links;
+import com.j11a.argus.url.StoredUrls;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import java.net.URI;
@@ -59,10 +60,12 @@ public class FeedService {
     private final PollProperties properties;
     private final JdbcClient jdbc;
     private final Clock clock;
+    private final SourceLock sourceLock;
 
     public FeedService(FeedRepository feeds, FeedInserter inserter, SourceService sources, FeedLoader loader,
             FeedIngestService ingest, FeedHealthUpdater healthUpdater,
-            FeedHealthGauges healthGauges, PollProperties properties, JdbcClient jdbc, Clock clock) {
+            FeedHealthGauges healthGauges, PollProperties properties, JdbcClient jdbc, Clock clock,
+            SourceLock sourceLock) {
         this.feeds = feeds;
         this.inserter = inserter;
         this.sources = sources;
@@ -73,6 +76,7 @@ public class FeedService {
         this.properties = properties;
         this.jdbc = jdbc;
         this.clock = clock;
+        this.sourceLock = sourceLock;
     }
 
     /**
@@ -80,21 +84,28 @@ public class FeedService {
      * each commit on their own. Retries and conditional GET do not apply here: the create path makes one attempt.
      */
     public FeedResponse create(CreateFeedRequest request) {
-        String url = Links.clean(request.url());
+        String url = StoredUrls.clean(request.url());
         if (url == null) {
             throw new ApiException(ErrorCode.BAD_REQUEST, "The feed URL must be an absolute http or https URL.");
         }
         inserter.findIdByUrl(url).ifPresent(existingId -> {
             throw conflict(Optional.of(existingId));
         });
+        Source explicitSource = request.sourceId() != null
+                ? sources.findById(request.sourceId())
+                        .orElseThrow(() -> new ApiException(
+                                ErrorCode.SOURCE_NOT_FOUND, "Source " + request.sourceId() + " does not exist."))
+                : null;
         URI uri = URI.create(url);
         IngestTelemetry.CreateFetchTimer timer = loader.startCreateFetch();
         FeedLoader.CreateLoaded.Created loaded = download(uri, timer);
         ParsedFeed parsed = loaded.feed();
-        Source source = sources.findOrCreate(SourceResolver.keyFor(parsed.siteLink(), uri), parsed.siteLink());
+        Source source = explicitSource != null
+                ? explicitSource
+                : sources.findOrCreate(SourceResolver.keyFor(parsed.siteLink(), uri), parsed.siteLink());
         timer.completed(source.getKey(), loaded.bodyLength());
         long id = inserter.insert(new NewFeed(source.getId(), nameFor(request, parsed, source), url,
-                        Links.clean(parsed.siteLink()), request.topic(), languageOf(parsed)))
+                        StoredUrls.cleanPublic(parsed.siteLink()), request.topic(), languageOf(parsed)))
                 .orElseThrow(() -> conflict(inserter.findIdByUrl(url)));
         Feed feed = requireFeed(id);
         // The feed is committed, so a failed first ingest must not turn a successful create into an error.
@@ -138,6 +149,13 @@ public class FeedService {
     /** Removes the feed and the articles only it linked to, in one transaction. The source row is kept. */
     @Transactional
     public void delete(long id) {
+        Long sourceId = jdbc.sql("SELECT source_id FROM feed WHERE id = :id")
+                .param("id", id)
+                .query(Long.class)
+                .optional()
+                .orElseThrow(() -> notFound(id));
+        // Serialises with ingest so a delete cannot race an article_feed insert for the same source.
+        sourceLock.acquire(sourceId);
         jdbc.sql(DELETE_OWNED_ARTICLES).param("feedId", id).update();
         int deleted = jdbc.sql("DELETE FROM feed WHERE id = :id").param("id", id).update();
         if (deleted == 0) {

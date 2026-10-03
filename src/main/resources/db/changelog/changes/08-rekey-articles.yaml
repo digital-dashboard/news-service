@@ -1,0 +1,8 @@
+databaseChangeLog:
+  - changeSet:
+      id: 08-rekey-articles
+      author: argus
+      comment: Irreversible. Recomputes guid/link keys with the phase-4 cleaner, collapses collisions, backfills hashes.
+      changes:
+        - customChange:
+            class: com.j11a.argus.migration.RekeyArticlesChange

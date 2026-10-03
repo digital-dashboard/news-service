@@ -64,7 +64,7 @@ class PollShutdownIT extends AbstractIntegrationTest {
     private long createFeed(int index) {
         String path = "/shutdown/" + index + ".xml";
         stub.serve(path, 200, RSS, feedXml(index, "old-" + index));
-        return feedService.create(new CreateFeedRequest(stub.baseUrl() + path, null, Topic.NEWS)).id();
+        return feedService.create(new CreateFeedRequest(stub.baseUrl() + path, null, Topic.NEWS, null)).id();
     }
 
     private long interruptedPolls() {

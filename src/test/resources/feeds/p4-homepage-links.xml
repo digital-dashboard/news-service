@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Blog Homepage Feed</title>
+    <description>Channel linking to homepage</description>
+    <link>https://blog.example.test/</link>
+    <item>
+      <title>Item One</title>
+      <description>First item</description>
+      <link>https://blog.example.test/</link>
+      <guid>blog-item-1</guid>
+      <pubDate>Tue, 06 Oct 2026 07:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Item Two</title>
+      <description>Second item</description>
+      <link>https://blog.example.test/</link>
+      <guid>blog-item-2</guid>
+      <pubDate>Tue, 06 Oct 2026 08:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Item Three</title>
+      <description>Third item</description>
+      <link>https://blog.example.test/</link>
+      <guid>blog-item-3</guid>
+      <pubDate>Tue, 06 Oct 2026 09:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

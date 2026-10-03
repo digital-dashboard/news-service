@@ -48,7 +48,7 @@ class FeedHealthIT extends AbstractIntegrationTest {
                         + "</channel></rss>"),
                 Map.of("ETag", "\"v1\""));
 
-        FeedResponse created = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS));
+        FeedResponse created = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS, null));
         long feedId = created.id();
 
         long articleCountBefore = jdbcClient.sql("SELECT count(*) FROM article").query(Long.class).single();
@@ -86,7 +86,7 @@ class FeedHealthIT extends AbstractIntegrationTest {
     void failureIncrementsConsecutiveFailuresAndRecordsLastErrorWithNoUrlThenSuccessResets() {
         stub.serve(PATH, 200, "application/rss+xml",
                 FeedStubServer.utf8("<rss><channel><title>H</title><link>https://health.example.test</link></channel></rss>"));
-        FeedResponse created = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS));
+        FeedResponse created = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS, null));
         long feedId = created.id();
 
         // Down with 503
@@ -126,7 +126,7 @@ class FeedHealthIT extends AbstractIntegrationTest {
     void concurrentRecordFailureCallsLoseNoIncrements() throws InterruptedException {
         stub.serve(PATH, 200, "application/rss+xml",
                 FeedStubServer.utf8("<rss><channel><title>H</title><link>https://health.example.test</link></channel></rss>"));
-        FeedResponse created = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS));
+        FeedResponse created = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS, null));
         long feedId = created.id();
 
         int concurrency = 20;
@@ -160,7 +160,7 @@ class FeedHealthIT extends AbstractIntegrationTest {
     void feedHealthGaugesReflectStateSinceLastSuccessAndDisappearOnDeletion() {
         stub.serve(PATH, 200, "application/rss+xml",
                 FeedStubServer.utf8("<rss><channel><title>H</title><link>https://health.example.test</link></channel></rss>"));
-        FeedResponse created = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS));
+        FeedResponse created = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS, null));
         long feedId = created.id();
         String feedIdStr = String.valueOf(feedId);
 
@@ -191,7 +191,7 @@ class FeedHealthIT extends AbstractIntegrationTest {
     void aFeedThatNeverSucceededReportsMinusOneSecondsSinceLastSuccess() {
         stub.serve(PATH, 200, "application/rss+xml",
                 FeedStubServer.utf8("<rss><channel><title>H</title><link>https://health.example.test</link></channel></rss>"));
-        long feedId = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS)).id();
+        long feedId = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS, null)).id();
         jdbcClient.sql("UPDATE feed SET last_success_at = NULL WHERE id = :id").param("id", feedId).update();
 
         healthGauges.refresh();
@@ -206,7 +206,7 @@ class FeedHealthIT extends AbstractIntegrationTest {
     void aLongFailureReasonIsCappedAtTheColumnLimit() {
         stub.serve(PATH, 200, "application/rss+xml",
                 FeedStubServer.utf8("<rss><channel><title>H</title><link>https://health.example.test</link></channel></rss>"));
-        long feedId = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS)).id();
+        long feedId = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS, null)).id();
 
         healthUpdater.recordFailure(feedId, "x".repeat(500), Instant.now());
 

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Batch Duplicate Feed</title>
+  <link href="https://atom.example.test/" rel="alternate"/>
+  <updated>2026-10-06T10:00:00Z</updated>
+  <id>tag:atom.example.test,2026:feed-dup</id>
+  <entry>
+    <title>First Version in Batch</title>
+    <link href="https://atom.example.test/dup-1" rel="alternate"/>
+    <id>tag:atom.example.test,2026:dup-1</id>
+    <published>2026-10-06T07:00:00Z</published>
+    <updated>2026-10-06T08:00:00Z</updated>
+    <summary>Earlier update</summary>
+  </entry>
+  <entry>
+    <title>Second Version in Batch</title>
+    <link href="https://atom.example.test/dup-1" rel="alternate"/>
+    <id>tag:atom.example.test,2026:dup-1</id>
+    <published>2026-10-06T07:00:00Z</published>
+    <updated>2026-10-06T09:00:00Z</updated>
+    <summary>Later update</summary>
+  </entry>
+</feed>

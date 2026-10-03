@@ -33,4 +33,22 @@ class LiquibaseBaselineIT extends AbstractIntegrationTest {
 
         assertThat(folded).isEqualTo("Odegaard");
     }
+
+    @Test
+    void contentHashAndRekeyChangeSetsRanExactlyOnce() {
+        Integer runs07 = jdbc.queryForObject(
+                "SELECT count(*) FROM databasechangelog WHERE id = '07-add-content-hash'", Integer.class);
+        assertThat(runs07).isEqualTo(1);
+
+        Integer runs08 = jdbc.queryForObject(
+                "SELECT count(*) FROM databasechangelog WHERE id = '08-rekey-articles'", Integer.class);
+        assertThat(runs08).isEqualTo(1);
+    }
+
+    @Test
+    void seedSourcesAndFeedsIsAbsentUnderTestContext() {
+        Integer runs09 = jdbc.queryForObject(
+                "SELECT count(*) FROM databasechangelog WHERE id = '09-seed-sources-and-feeds'", Integer.class);
+        assertThat(runs09).isZero();
+    }
 }

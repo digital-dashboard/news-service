@@ -1,0 +1,24 @@
+databaseChangeLog:
+  - changeSet:
+      id: 07-add-content-hash
+      author: argus
+      changes:
+        - addColumn:
+            tableName: article
+            columns:
+              - column:
+                  name: content_hash
+                  type: text
+        - addColumn:
+            tableName: article_feed
+            columns:
+              - column:
+                  name: content_hash
+                  type: text
+      rollback:
+        - dropColumn:
+            tableName: article_feed
+            columnName: content_hash
+        - dropColumn:
+            tableName: article
+            columnName: content_hash

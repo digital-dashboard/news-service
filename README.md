@@ -52,14 +52,17 @@ Everything is under `/news/v2`. Writes need the `X-Admin-Key` header; reads don'
 
 Feed URLs can carry tokens, and reads are open. Without a valid admin key, every response that contains a feed URL shows it without user-info and query string (`scheme://host[:port]/path`). With a valid `X-Admin-Key`, even on a `GET`, the full URL is returned. `siteUrl` is a public site link and is always shown as stored. The redaction strips user-info and the query string only: a token placed in the URL path is still visible, so keep tokens in the query string.
 
-- `POST /feeds`: add a feed. Body `url`, `topic` and optional `name`. It makes a single download attempt: retries and conditional GET apply to polls and refreshes only. Returns 201, or 400 (validation, including a URL with user-info such as `http://user:pass@host/feed`), 401 (missing or wrong key), 409 `FEED_URL_CONFLICT` (that exact URL exists) or 422 `FEED_INVALID` (the URL could not be fetched or is not a feed; `reason` says why).
+- `POST /feeds`: add a feed. Body `url`, `topic` and optional `name` and `sourceId`. Without `sourceId` the feed joins the source of its registrable domain, created if missing; an explicit `sourceId` overrides that. It makes a single download attempt: retries and conditional GET apply to polls and refreshes only. Returns 201, or 400 (validation, including a URL with user-info such as `http://user:pass@host/feed`), 401 (missing or wrong key), 409 `FEED_URL_CONFLICT` (that exact URL exists) or 404 `SOURCE_NOT_FOUND` (`sourceId` names no source) or 422 `FEED_INVALID` (the URL could not be fetched or is not a feed; `reason` says why).
 - `GET /feeds?page&size`: paged list of feeds with health (`state`, `consecutiveFailures`, `lastFetchedAt`, `lastSuccessAt`, `lastError`), ordered by `id ASC`. `page` defaults to 0; `size` defaults to 20 (max 100). URLs are redacted without the admin key.
 - `GET /feeds/{id}`: one feed with health, or 404 `FEED_NOT_FOUND`. URL is redacted without the admin key.
 - `PATCH /feeds/{id}`: toggle feed enabled state. Body `{"enabled": boolean}`. Needs `X-Admin-Key`. Returns the updated feed with its current state, and takes effect on the next poll. It changes only `enabled`, so health recorded by a concurrent fetch is never overwritten. Errors: 400 (missing or null `enabled`), 401 (missing or wrong key) or 404 `FEED_NOT_FOUND`.
 - `DELETE /feeds/{id}`: delete a feed and its orphan articles in one transaction. Articles still linked to another feed are preserved; the source row is kept. Needs `X-Admin-Key`. Returns 204 or 404 `FEED_NOT_FOUND`.
 - `POST /feeds/{id}/refresh`: fetch and ingest now, and return the ingest report. It answers 200 even when the upstream failed; the report then has `outcome=FAILED`. An unknown id is 404 `FEED_NOT_FOUND`.
 - `POST /feeds/refresh`: manual poll of all enabled feeds across virtual thread workers. The request blocks until every feed has finished; the worst case is bounded by the retry budget (`ARGUS_FETCH_RETRY_TIMEOUT` plus one read timeout) and by the concurrency. Returns 200 with an `AggregatePollReport`. Needs `X-Admin-Key`. If another poll is currently running (manual or scheduled), returns 409 `POLL_IN_PROGRESS`. If shutdown interrupts the poll, returns 503 `SERVICE_UNAVAILABLE`; feeds that had finished stay stored.
-- `GET /articles?page&size`: articles, newest first. `page` is zero-based and defaults to 0; `size` is 1 to 100 and defaults to 20. A page whose offset (`page * size`) exceeds the 32-bit range is 400 `VALIDATION_FAILED`.
+- `GET /sources?page&size`: paged list of sources ordered by `id ASC`, each with `id`, `key`, `name`, `homepage`, `country`, `articleCount` and its `feeds` (`id`, `name`, `topic`; no URLs). `page` defaults to 0; `size` defaults to 20 (max 100).
+- `GET /sources/{id}`: one source, or 404 `SOURCE_NOT_FOUND`.
+- `PATCH /sources/{id}`: rename a source or set its homepage or country. Body fields `name` (1 to 255 characters, not blank), `homepage` (absolute http(s) URL, at most 2048 characters) and `country` (ISO 3166-1 alpha-2, case-insensitive, stored upper case), all optional; an omitted field is left unchanged, so a value cannot be cleared. Needs `X-Admin-Key`. Returns the updated source. Errors: 400 `VALIDATION_FAILED` (no field given, blank name, bad URL or bad country), 401 (missing or wrong key) or 404 `SOURCE_NOT_FOUND`.
+- `GET /articles?topic&country&page&size`: articles, newest first. `topic` (for example `NEWS`) and `country` (ISO 3166-1 alpha-2, case-insensitive) are repeatable. Values within one filter are alternatives, and the two filters combine with AND. An article matches `topic` through any feed it appeared in and `country` through its source. An invalid topic or country is 400 `VALIDATION_FAILED`. Each article has a `source` summary and `feeds`, the list of feeds it appeared in (`id`, `name`, `topic`, ordered by `id`). `page` is zero-based and defaults to 0; `size` is 1 to 100 and defaults to 20. A page whose offset (`page * size`) exceeds the 32-bit range is 400 `VALIDATION_FAILED`.
 
 ```bash
 curl -X POST http://localhost:8080/news/v2/feeds \
@@ -79,6 +82,28 @@ Outcome values, as reported in the API and as metric tag values:
 - `argus.scheduled.job`: `success`, `skipped` (the previous poll was still running), `error` or `interrupted`.
 
 On shutdown the in-flight poll is interrupted rather than awaited; see the worst-case shutdown time in [observability/README.md](observability/README.md).
+
+## Ingest reports and deduplication
+
+`POST /feeds/{id}/refresh` returns an `IngestReport` and `POST /feeds/refresh` an `AggregatePollReport` with the same counters summed over all feeds. The counters are `entriesSeen`, `inserted`, `updated`, `linked`, `unchanged` and `skipped`, and they always add up: `entriesSeen` is the sum of the other five. The same decisions are the `decision` tag of `argus_ingest_entries_total`, with a `reason` tag where one applies:
+
+- `inserted`: a new article.
+- `updated`: an existing article changed. `content_changed` (title, excerpt or categories differ, so the article is rewritten), `timestamp_only` (only the upstream update time moved) or `insert_conflict` (the article already existed under that GUID, this feed was linked to it and its content left untouched).
+- `linked`: the entry matched an existing article first seen through another feed of the same source, so this feed is linked to it, unless its upstream update time is newer (then it is `updated{timestamp_only}`).
+- `unchanged`: already stored through this feed with nothing new.
+- `skipped`: not stored. `missing_identity` (no usable GUID or link) or `batch_duplicate` (a repeat of an earlier entry in the same download).
+
+Deduplication is per source. Ingest takes a Postgres advisory lock per source, so feeds of one source ingest one at a time, and inserts use `ON CONFLICT`. An entry matches an existing article by GUID first, then by cleaned link; the link fallback is guarded against homepage links and links shared by several entries in the same batch, and replaces the stored GUID when it matches. Edits are detected by a per-feed content hash, or by a newer upstream update time. An article is linked only to feeds of its own source.
+
+The tracking parameters stripped from links are `fbclid`, `gclid`, `mc_cid`, `mc_eid`, `cmpid`, `ref` and any name starting with `utm_` or `at_`. The list is fixed and not configurable. The link cleaner, this list and the content hash define the stored `guid_key`, `link_key` and `content_hash` values, so changing any of them needs a new Liquibase re-key changeset; `KeyStabilityTest` guards the current outputs. Without one, the first poll after a deploy would duplicate existing articles.
+
+## Seed
+
+Liquibase changeset `09-seed-sources-and-feeds` adds 17 sources and 20 feeds (country, homepage and topic set). It runs once per database, under context `!test`, so tests skip it. After that the feeds belong to the database: a seeded feed deleted through the API stays deleted, and edits made through the API are kept. Existing rows are matched by source key and feed URL, and a source name the owner changed is kept.
+
+## Recorded deviations
+
+- OpenAPI annotations for the phase 4 endpoints are deferred to phase 13.
 
 ## Observability
 

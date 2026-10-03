@@ -1,0 +1,62 @@
+databaseChangeLog:
+  - changeSet:
+      id: 09-seed-sources-and-feeds
+      author: argus
+      context: "!test"
+      comment: >-
+        Runs once, except under the test context. ON CONFLICT only fills defaults and never overwrites owner edits.
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO source (key, name, homepage_url, country, created_at, updated_at)
+              VALUES
+                ('bnnbloomberg.ca', 'BNN Bloomberg', 'https://www.bnnbloomberg.ca/', 'CA', now(), now()),
+                ('citynews.ca', 'CityNews', 'https://toronto.citynews.ca/', 'CA', now(), now()),
+                ('theglobeandmail.com', 'The Globe and Mail', 'https://www.theglobeandmail.com/', 'CA', now(), now()),
+                ('cbc.ca', 'CBC', 'https://www.cbc.ca/', 'CA', now(), now()),
+                ('globalnews.ca', 'Global News', 'https://globalnews.ca/', 'CA', now(), now()),
+                ('sportsnet.ca', 'Sportsnet', 'https://www.sportsnet.ca/', 'CA', now(), now()),
+                ('bbc.co.uk', 'BBC', 'https://www.bbc.co.uk/', 'GB', now(), now()),
+                ('dailymail.co.uk', 'Daily Mail', 'https://www.dailymail.co.uk/', 'GB', now(), now()),
+                ('mirror.co.uk', 'The Mirror', 'https://www.mirror.co.uk/', 'GB', now(), now()),
+                ('thesun.co.uk', 'The Sun', 'https://www.thesun.co.uk/', 'GB', now(), now()),
+                ('lusakatimes.com', 'Lusaka Times', 'https://www.lusakatimes.com/', 'ZM', now(), now()),
+                ('zambia24.com', 'Zambia24', 'https://zambia24.com/', 'ZM', now(), now()),
+                ('mwebantu.com', 'Mwebantu', 'https://www.mwebantu.com/', 'ZM', now(), now()),
+                ('zambianbusinesstimes.com', 'Zambian Business Times', 'https://zambianbusinesstimes.com/', 'ZM', now(), now()),
+                ('zambianfootball.co.zm', 'Zambian Football', 'https://www.zambianfootball.co.zm/', 'ZM', now(), now()),
+                ('lusakastar.com', 'Lusaka Star', 'https://www.lusakastar.com/', 'ZM', now(), now()),
+                ('farmersreviewafrica.com', 'Farmers Review Africa', 'https://www.farmersreviewafrica.com/', 'ZM', now(), now())
+              ON CONFLICT (key) DO UPDATE SET
+                name = CASE WHEN source.name = source.key THEN EXCLUDED.name ELSE source.name END,
+                homepage_url = COALESCE(source.homepage_url, EXCLUDED.homepage_url),
+                country = COALESCE(source.country, EXCLUDED.country),
+                updated_at = now()
+        - sql:
+            sql: |
+              INSERT INTO feed (source_id, name, url, topic, enabled, created_at, updated_at)
+              SELECT s.id, v.name, v.url, v.topic, true, now(), now()
+              FROM (VALUES
+                ('bnnbloomberg.ca', 'BNN Bloomberg', 'https://www.bnnbloomberg.ca/arc/outboundfeeds/rss/?outputType=xml', 'BUSINESS'),
+                ('citynews.ca', 'CityNews Toronto', 'https://toronto.citynews.ca/feed/', 'NEWS'),
+                ('theglobeandmail.com', 'The Globe and Mail (Canada)', 'https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/canada/', 'NEWS'),
+                ('cbc.ca', 'CBC Top Stories', 'https://www.cbc.ca/webfeed/rss/rss-topstories', 'NEWS'),
+                ('cbc.ca', 'CBC Sports', 'https://www.cbc.ca/webfeed/rss/rss-sports', 'SPORT'),
+                ('globalnews.ca', 'Global News', 'https://globalnews.ca/feed/', 'NEWS'),
+                ('sportsnet.ca', 'Sportsnet', 'https://www.sportsnet.ca/feed/', 'SPORT'),
+                ('bbc.co.uk', 'BBC News', 'https://feeds.bbci.co.uk/news/rss.xml', 'NEWS'),
+                ('bbc.co.uk', 'BBC World', 'https://feeds.bbci.co.uk/news/world/rss.xml', 'WORLD'),
+                ('bbc.co.uk', 'BBC Football', 'https://feeds.bbci.co.uk/sport/football/rss.xml', 'SPORT'),
+                ('dailymail.co.uk', 'Daily Mail News', 'https://www.dailymail.co.uk/news/index.rss', 'NEWS'),
+                ('mirror.co.uk', 'The Mirror News', 'https://www.mirror.co.uk/news/?service=rss', 'NEWS'),
+                ('thesun.co.uk', 'The Sun', 'https://www.thesun.co.uk/feed/', 'NEWS'),
+                ('lusakatimes.com', 'Lusaka Times', 'https://www.lusakatimes.com/feed/', 'NEWS'),
+                ('zambia24.com', 'Zambia24', 'https://zambia24.com/feed/', 'NEWS'),
+                ('mwebantu.com', 'Mwebantu', 'https://www.mwebantu.com/feed/', 'NEWS'),
+                ('zambianbusinesstimes.com', 'Zambian Business Times', 'https://zambianbusinesstimes.com/feed/', 'BUSINESS'),
+                ('zambianfootball.co.zm', 'Zambian Football', 'https://www.zambianfootball.co.zm/feed/', 'SPORT'),
+                ('lusakastar.com', 'Lusaka Star', 'https://www.lusakastar.com/feed/', 'NEWS'),
+                ('farmersreviewafrica.com', 'Farmers Review Africa', 'https://www.farmersreviewafrica.com/feed/', 'BUSINESS')
+              ) AS v(source_key, name, url, topic)
+              JOIN source s ON s.key = v.source_key
+              ON CONFLICT (url) DO NOTHING

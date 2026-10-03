@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Timestamp Feed</title>
+  <link href="https://atom.example.test/" rel="alternate"/>
+  <updated>2026-10-06T08:00:00Z</updated>
+  <id>tag:atom.example.test,2026:feed</id>
+  <entry>
+    <title>Stable Content</title>
+    <link href="https://atom.example.test/entry-1" rel="alternate"/>
+    <id>tag:atom.example.test,2026:entry-1</id>
+    <published>2026-10-06T07:00:00Z</published>
+    <updated>2026-10-06T08:00:00Z</updated>
+    <summary>Same content body</summary>
+  </entry>
+</feed>

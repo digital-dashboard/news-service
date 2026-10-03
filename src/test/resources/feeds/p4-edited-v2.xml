@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Edited Feed</title>
+    <description>Edited Feed v2</description>
+    <link>https://news.example.test/</link>
+    <item>
+      <title>Edited Title</title>
+      <description>Original excerpt</description>
+      <link>https://news.example.test/edited-article</link>
+      <guid>edited-guid-1</guid>
+      <pubDate>Tue, 06 Oct 2026 07:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

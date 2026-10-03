@@ -3,6 +3,7 @@ package com.j11a.argus.article;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,7 +20,10 @@ public class ArticleQueryService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ArticleResponse> list(int page, int size) {
-        return articles.findPage(PageRequest.of(page, size, NEWEST_FIRST)).map(ArticleResponse::of);
+    public Page<ArticleResponse> list(ArticleFilter filter, int page, int size) {
+        Specification<Article> spec = Specification.allOf(
+                ArticleSpecifications.topicIn(filter.topics()),
+                ArticleSpecifications.countryIn(filter.countries()));
+        return articles.findAll(spec, PageRequest.of(page, size, NEWEST_FIRST)).map(ArticleResponse::of);
     }
 }

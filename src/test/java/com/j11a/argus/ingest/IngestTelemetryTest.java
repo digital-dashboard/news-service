@@ -21,6 +21,8 @@ import io.micrometer.core.instrument.observation.DefaultMeterObservationHandler;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
 import io.micrometer.tracing.Tracer;
+import com.j11a.argus.ingest.dedup.LinkFallback;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -94,11 +96,42 @@ class IngestTelemetryTest {
 
         telemetry.ingest(feed, () -> IngestReport.notModified(1L));
         telemetry.ingest(feed, () -> IngestReport.failed(1L, "io"));
-        telemetry.ingest(feed, () -> IngestReport.completed(1L, 0, new PersistCounts(0, 0, Map.of())));
+        telemetry.ingest(feed, () -> IngestReport.completed(1L, 0,
+                new PersistCounts(0, Map.of(), 0, 0, Map.of(), Map.of())));
 
         assertThat(ingestOutcomeCount("not_modified")).isEqualTo(1);
         assertThat(ingestOutcomeCount("failed")).isEqualTo(1);
         assertThat(ingestOutcomeCount("completed")).isEqualTo(1);
+    }
+
+    @Test
+    void recordDecisionsEmitsCountersOnlyWhenCountIsPositive() {
+        PersistCounts counts = new PersistCounts(
+                2,
+                Map.of("content_changed", 1, "timestamp_only", 0),
+                3,
+                0,
+                Map.of("missing_identity", 4, "batch_duplicate", 0),
+                Map.of());
+
+        telemetry.recordDecisions(SOURCE_KEY, counts);
+
+        assertThat(decisionCount("inserted", "none")).isEqualTo(2);
+        assertThat(decisionCount("updated", "content_changed")).isEqualTo(1);
+        assertThat(decisionCount("updated", "timestamp_only")).isEqualTo(0);
+        assertThat(decisionCount("linked", "none")).isEqualTo(3);
+        assertThat(decisionCount("unchanged", "none")).isEqualTo(0);
+        assertThat(decisionCount("skipped", "missing_identity")).isEqualTo(4);
+        assertThat(decisionCount("skipped", "batch_duplicate")).isEqualTo(0);
+    }
+
+    private double decisionCount(String decision, String reason) {
+        Counter counter = meters.find(MetricNames.INGEST_ENTRIES)
+                .tag(SOURCE, SOURCE_KEY)
+                .tag("decision", decision)
+                .tag("reason", reason)
+                .counter();
+        return counter == null ? 0 : counter.count();
     }
 
     private static Feed feed() {
@@ -134,5 +167,38 @@ class IngestTelemetryTest {
 
         assertThat(fetchTimerCount("unknown", "failed", "timeout")).isEqualTo(1);
         assertThat(fetchTimerCount("unknown", "fetched", "none")).isEqualTo(1);
+    }
+
+    @Test
+    void recordLinkFallbacksIncrementsAllThreeOutcomesEvenWhenZero() {
+        Map<LinkFallback, Integer> fallbacks = Map.of(
+                LinkFallback.GUID_REPLACED, 2,
+                LinkFallback.GUARDED_HOMEPAGE, 0,
+                LinkFallback.GUARDED_SHARED, 1);
+
+        telemetry.recordLinkFallbacks(SOURCE_KEY, fallbacks);
+
+        assertThat(meters.find(MetricNames.INGEST_LINK_FALLBACK)
+                .tag(SOURCE, SOURCE_KEY).tag(OUTCOME, "guid_replaced").counter().count()).isEqualTo(2.0);
+        assertThat(meters.find(MetricNames.INGEST_LINK_FALLBACK)
+                .tag(SOURCE, SOURCE_KEY).tag(OUTCOME, "guarded_homepage").counter().count()).isEqualTo(0.0);
+        assertThat(meters.find(MetricNames.INGEST_LINK_FALLBACK)
+                .tag(SOURCE, SOURCE_KEY).tag(OUTCOME, "guarded_shared").counter().count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void lockWaitWrapsAcquisitionAndRecordsTimer() {
+        Duration wait = telemetry.lockWait(SOURCE_KEY, 42L, () -> Duration.ofMillis(15));
+        assertThat(wait).isEqualTo(Duration.ofMillis(15));
+
+        Timer timer = meters.find(MetricNames.INGEST_LOCK_WAIT).tag(SOURCE, SOURCE_KEY).timer();
+        assertThat(timer).isNotNull();
+        assertThat(timer.count()).isEqualTo(1);
+    }
+
+    @Test
+    void spanExecutesActionAndReturnsResult() {
+        String result = telemetry.span("test.span", Map.of("source.id", "42"), () -> "hello");
+        assertThat(result).isEqualTo("hello");
     }
 }

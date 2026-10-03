@@ -109,9 +109,9 @@ public class FeedIngestService {
                 MDC.MDCCloseable sourceScope = MDC.putCloseable("sourceId", String.valueOf(feed.getSource().getId()))) {
             try {
                 IngestReport report = telemetry.ingest(feed, work);
-                LOG.info("Ingest {}: seen={} inserted={} unchanged={} skipped={} reason={}", report.outcome(),
-                        report.entriesSeen(), report.inserted(), report.unchanged(), report.skipped(),
-                        report.failureReason());
+                LOG.info("Ingest {}: seen={} inserted={} updated={} linked={} unchanged={} skipped={} reason={}",
+                        report.outcome(), report.entriesSeen(), report.inserted(), report.updated(), report.linked(),
+                        report.unchanged(), report.skipped(), report.failureReason());
                 return report;
             } finally {
                 if (!Thread.currentThread().isInterrupted()) {
@@ -127,6 +127,7 @@ public class FeedIngestService {
                 () -> persister.persist(feed, parsed.entries(), fetchedAt));
         telemetry.recordMissing(sourceKey, parsed.entries());
         telemetry.recordDecisions(sourceKey, counts);
+        telemetry.recordLinkFallbacks(sourceKey, counts.linkFallbacks());
         return IngestReport.completed(feed.getId(), parsed.entries().size(), counts);
     }
 }

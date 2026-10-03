@@ -1,14 +1,14 @@
 {
   "uid": "argus-observability",
   "title": "Argus \u2014 Observability",
-  "description": "Argus service health: HTTP RED metrics, scheduled polling, per-feed health, the ingestion pipeline, data quality, JVM, PostgreSQL and HikariCP, container resources, Tempo traces and Loki logs. Version-controlled in grafana/dashboards and validated by the Argus dashboard tests.",
+  "description": "Argus service health: HTTP RED metrics, scheduled polling, per-feed health, the ingestion pipeline, deduplication, data quality, JVM, PostgreSQL and HikariCP, container resources, Tempo traces and Loki logs. Version-controlled in grafana/dashboards and validated by the Argus dashboard tests.",
   "tags": [
     "argus",
     "artemis",
     "observability"
   ],
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "graphTooltip": 1,
   "refresh": "30s",
@@ -77,7 +77,7 @@
       {
         "name": "source",
         "label": "Source",
-        "description": "Filters the ingestion, fetch retry and 304 ratio panels by feed source.",
+        "description": "Filters the ingestion, deduplication, data-quality, fetch-retry and 304-ratio panels by feed source.",
         "type": "query",
         "datasource": {
           "type": "prometheus",
@@ -1401,7 +1401,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 12,
         "x": 0,
         "y": 44
       },
@@ -1458,8 +1458,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
+        "w": 12,
+        "x": 12,
         "y": 44
       },
       "targets": [
@@ -1505,19 +1505,32 @@
       }
     },
     {
+      "id": 53,
+      "type": "row",
+      "title": "Deduplication",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 52
+      },
+      "panels": []
+    },
+    {
       "id": 34,
       "type": "timeseries",
       "title": "Entry decisions",
-      "description": "Parsed entries per second by persist decision: inserted, unchanged or skipped. Stacked so the total is the entry throughput.",
+      "description": "Parsed entries per second by persist decision: inserted, updated, linked, unchanged or skipped. Stacked so the total is the entry throughput.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 44
+        "w": 12,
+        "x": 0,
+        "y": 53
       },
       "targets": [
         {
@@ -1566,6 +1579,348 @@
       }
     },
     {
+      "id": 54,
+      "type": "timeseries",
+      "title": "Skip reasons",
+      "description": "Rate of skipped entries per second by reason (missing_identity, batch_duplicate).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 53
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (reason) (rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\",decision=\"skipped\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 55,
+      "type": "timeseries",
+      "title": "Link-fallback outcomes",
+      "description": "Rate of link-fallback outcomes per second (guid_replaced, guarded_homepage, guarded_shared).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 61
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (outcome) (rate(argus_ingest_link_fallback_total{job=\"argus\",source=~\"$source\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 56,
+      "type": "timeseries",
+      "title": "Lock wait p95 by source",
+      "description": "95th percentile duration waiting for per-source advisory transaction locks during ingest.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 61
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, source) (rate(argus_ingest_lock_wait_seconds_bucket{job=\"argus\",source=~\"$source\"}[$__rate_interval])))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 57,
+      "type": "timeseries",
+      "title": "Updates by reason",
+      "description": "Rate of updated entries per second by update reason: content_changed, timestamp_only (also used when an entry matched an article first seen through another feed of the source and its upstream update time is newer) or insert_conflict (the article already existed under that GUID, this feed was linked to it and its content left untouched).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 61
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (reason) (rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\",decision=\"updated\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 58,
+      "type": "timeseries",
+      "title": "Duplicate pressure",
+      "description": "Share of entries that are duplicates (linked or unchanged) relative to total entries seen.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 69
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum(rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\",decision=~\"linked|unchanged\"}[$__rate_interval])) / clamp_min(sum(rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\"}[$__rate_interval])), 0.000000001)",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "duplicate pressure"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 59,
+      "type": "timeseries",
+      "title": "Cross-feed overlap",
+      "description": "Share of cross-feed duplicate links relative to new content (inserted or linked). A linked entry matched an existing article first seen through another feed of the source, unless its upstream update time is newer (then it counts as updated{timestamp_only}).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 69
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum(rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\",decision=\"linked\"}[$__rate_interval])) / clamp_min(sum(rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\",decision=~\"inserted|linked\"}[$__rate_interval])), 0.000000001)",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "cross-feed overlap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 35,
       "type": "row",
       "title": "Data quality",
@@ -1574,7 +1929,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 52
+        "y": 77
       },
       "panels": []
     },
@@ -1591,7 +1946,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 53
+        "y": 78
       },
       "targets": [
         {
@@ -1648,7 +2003,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 53
+        "y": 78
       },
       "targets": [
         {
@@ -1701,7 +2056,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 61
+        "y": 86
       },
       "panels": []
     },
@@ -1718,7 +2073,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 62
+        "y": 87
       },
       "targets": [
         {
@@ -1771,7 +2126,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 95
       },
       "panels": []
     },
@@ -1788,7 +2143,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 71
+        "y": 96
       },
       "targets": [
         {
@@ -1845,7 +2200,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 71
+        "y": 96
       },
       "targets": [
         {
@@ -1926,7 +2281,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 79
+        "y": 104
       },
       "targets": [
         {
@@ -1983,7 +2338,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 87
+        "y": 112
       },
       "panels": []
     },
@@ -2000,7 +2355,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 88
+        "y": 113
       },
       "targets": [
         {
@@ -2069,7 +2424,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 88
+        "y": 113
       },
       "targets": [
         {
@@ -2126,7 +2481,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 96
+        "y": 121
       },
       "targets": [
         {
@@ -2182,7 +2537,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 96
+        "y": 121
       },
       "targets": [
         {
@@ -2248,7 +2603,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 104
+        "y": 129
       },
       "panels": []
     },
@@ -2265,7 +2620,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 105
+        "y": 130
       },
       "targets": [
         {
@@ -2357,7 +2712,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 105
+        "y": 130
       },
       "targets": [
         {
@@ -2414,7 +2769,7 @@
         "h": 4,
         "w": 12,
         "x": 0,
-        "y": 113
+        "y": 138
       },
       "targets": [
         {
@@ -2480,7 +2835,7 @@
         "h": 4,
         "w": 12,
         "x": 0,
-        "y": 117
+        "y": 142
       },
       "targets": [
         {
@@ -2542,7 +2897,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 117
+        "y": 142
       },
       "targets": [
         {
@@ -2606,7 +2961,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 125
+        "y": 150
       },
       "panels": []
     },
@@ -2623,7 +2978,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 126
+        "y": 151
       },
       "targets": [
         {
@@ -2679,7 +3034,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 126
+        "y": 151
       },
       "targets": [
         {
@@ -2732,7 +3087,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 134
+        "y": 159
       },
       "panels": []
     },
@@ -2749,7 +3104,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 135
+        "y": 160
       },
       "targets": [
         {
@@ -2779,7 +3134,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 145
+        "y": 170
       },
       "panels": []
     },
@@ -2796,7 +3151,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 146
+        "y": 171
       },
       "targets": [
         {
@@ -2855,7 +3210,7 @@
         "h": 14,
         "w": 24,
         "x": 0,
-        "y": 154
+        "y": 179
       },
       "targets": [
         {

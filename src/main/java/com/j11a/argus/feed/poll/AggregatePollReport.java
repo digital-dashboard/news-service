@@ -14,6 +14,8 @@ public record AggregatePollReport(
         int failed,
         int entriesSeen,
         int inserted,
+        int updated,
+        int linked,
         int unchanged,
         int skipped,
         List<IngestReport> reports) {
@@ -22,11 +24,15 @@ public record AggregatePollReport(
             String pollId, PollTrigger trigger, Duration duration, List<IngestReport> reports) {
         int entriesSeen = 0;
         int inserted = 0;
+        int updated = 0;
+        int linked = 0;
         int unchanged = 0;
         int skipped = 0;
         for (IngestReport r : reports) {
             entriesSeen += r.entriesSeen();
             inserted += r.inserted();
+            updated += r.updated();
+            linked += r.linked();
             unchanged += r.unchanged();
             skipped += r.skipped();
         }
@@ -41,6 +47,8 @@ public record AggregatePollReport(
                 count(reports, IngestReport.Outcome.FAILED),
                 entriesSeen,
                 inserted,
+                updated,
+                linked,
                 unchanged,
                 skipped,
                 List.copyOf(reports));
