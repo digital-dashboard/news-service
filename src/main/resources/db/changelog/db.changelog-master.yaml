@@ -1,13 +1,19 @@
 databaseChangeLog:
   - include:
-      file: classpath:db/changelog/changes/01-enable-unaccent.yaml
+      file: db/changelog/changes/01-enable-unaccent.yaml
   - include:
-      file: classpath:db/changelog/changes/02-create-source.yaml
+      file: db/changelog/changes/02-create-source.yaml
   - include:
-      file: classpath:db/changelog/changes/03-create-feed.yaml
+      file: db/changelog/changes/03-create-feed.yaml
   - include:
-      file: classpath:db/changelog/changes/04-create-article.yaml
+      file: db/changelog/changes/04-create-article.yaml
   - include:
-      file: classpath:db/changelog/changes/05-create-article-feed.yaml
+      file: db/changelog/changes/05-create-article-feed.yaml
   - include:
-      file: classpath:db/changelog/changes/06-add-feed-health.yaml
+      file: db/changelog/changes/06-add-feed-health.yaml
+  - include:
+      file: db/changelog/changes/07-add-content-hash.yaml
+  - include:
+      file: db/changelog/changes/08-rekey-articles.yaml
+  - include:
+      file: db/changelog/changes/09-seed-sources-and-feeds.yaml

@@ -94,11 +94,42 @@ class IngestTelemetryTest {
 
         telemetry.ingest(feed, () -> IngestReport.notModified(1L));
         telemetry.ingest(feed, () -> IngestReport.failed(1L, "io"));
-        telemetry.ingest(feed, () -> IngestReport.completed(1L, 0, new PersistCounts(0, 0, Map.of())));
+        telemetry.ingest(feed, () -> IngestReport.completed(1L, 0,
+                new PersistCounts(0, Map.of(), 0, 0, Map.of(), Map.of())));
 
         assertThat(ingestOutcomeCount("not_modified")).isEqualTo(1);
         assertThat(ingestOutcomeCount("failed")).isEqualTo(1);
         assertThat(ingestOutcomeCount("completed")).isEqualTo(1);
+    }
+
+    @Test
+    void recordDecisionsEmitsCountersOnlyWhenCountIsPositive() {
+        PersistCounts counts = new PersistCounts(
+                2,
+                Map.of("content_changed", 1, "timestamp_only", 0),
+                3,
+                0,
+                Map.of("missing_identity", 4, "batch_duplicate", 0),
+                Map.of());
+
+        telemetry.recordDecisions(SOURCE_KEY, counts);
+
+        assertThat(decisionCount("inserted", "none")).isEqualTo(2);
+        assertThat(decisionCount("updated", "content_changed")).isEqualTo(1);
+        assertThat(decisionCount("updated", "timestamp_only")).isEqualTo(0);
+        assertThat(decisionCount("linked", "none")).isEqualTo(3);
+        assertThat(decisionCount("unchanged", "none")).isEqualTo(0);
+        assertThat(decisionCount("skipped", "missing_identity")).isEqualTo(4);
+        assertThat(decisionCount("skipped", "batch_duplicate")).isEqualTo(0);
+    }
+
+    private double decisionCount(String decision, String reason) {
+        Counter counter = meters.find(MetricNames.INGEST_ENTRIES)
+                .tag(SOURCE, SOURCE_KEY)
+                .tag("decision", decision)
+                .tag("reason", reason)
+                .counter();
+        return counter == null ? 0 : counter.count();
     }
 
     private static Feed feed() {

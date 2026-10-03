@@ -1,4 +1,6 @@
 spring:
+  liquibase:
+    contexts: test
   jpa:
     hibernate:
       # Entities and changesets must not drift apart.

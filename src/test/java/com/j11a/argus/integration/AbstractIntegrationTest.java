@@ -50,6 +50,6 @@ public abstract class AbstractIntegrationTest {
     /** Serves the fixture at path on the stub host and registers a feed for it, which also ingests it. */
     protected FeedResponse createFeedFrom(String path, String fixture, Topic topic) {
         stub.serveFixture(path, fixture);
-        return feedService.create(new CreateFeedRequest(stub.baseUrl() + path, null, topic));
+        return feedService.create(new CreateFeedRequest(stub.baseUrl() + path, null, topic, null));
     }
 }

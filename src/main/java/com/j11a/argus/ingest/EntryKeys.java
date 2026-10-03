@@ -1,7 +1,7 @@
 package com.j11a.argus.ingest;
 
 import com.j11a.argus.crypto.Sha256;
-import com.j11a.argus.url.Links;
+import com.j11a.argus.url.StoredUrls;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 import org.jspecify.annotations.Nullable;
@@ -17,11 +17,11 @@ public final class EntryKeys {
 
     public static @Nullable String guidKey(@Nullable String rawGuid, @Nullable String link) {
         String guid = rawGuid == null ? "" : rawGuid.strip();
-        return capped(guid.isEmpty() ? Links.clean(link) : guid);
+        return capped(guid.isEmpty() ? StoredUrls.clean(link) : guid);
     }
 
     public static @Nullable String linkKey(@Nullable String link) {
-        return capped(Links.clean(link));
+        return capped(StoredUrls.clean(link));
     }
 
     private static @Nullable String capped(@Nullable String key) {

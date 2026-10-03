@@ -191,7 +191,7 @@ class FeedControllerTest {
     @Test
     void refreshReturnsTheIngestReport() throws Exception {
         when(ingest.refresh(42)).thenReturn(
-                new IngestReport(42, IngestReport.Outcome.COMPLETED, null, 5, 3, 2, 0));
+                new IngestReport(42, IngestReport.Outcome.COMPLETED, null, 5, 3, 0, 0, 2, 0));
 
         mockMvc.perform(adminPost(FEEDS + "/42/refresh", ""))
                 .andExpect(status().isOk())
@@ -206,7 +206,7 @@ class FeedControllerTest {
     @Test
     void failedRefreshIsStill200WithTheReason() throws Exception {
         when(ingest.refresh(42)).thenReturn(
-                new IngestReport(42, IngestReport.Outcome.FAILED, "http_status", 0, 0, 0, 0));
+                new IngestReport(42, IngestReport.Outcome.FAILED, "http_status", 0, 0, 0, 0, 0, 0));
 
         mockMvc.perform(adminPost(FEEDS + "/42/refresh", ""))
                 .andExpect(status().isOk())
@@ -287,7 +287,7 @@ class FeedControllerTest {
     @Test
     void refreshAllCallsPollerAndReturnsAggregateReport() throws Exception {
         AggregatePollReport report = new AggregatePollReport(
-                "poll-1", PollTrigger.MANUAL, 250, 2, 2, 0, 0, 10, 5, 5, 0, List.of());
+                "poll-1", PollTrigger.MANUAL, 250, 2, 2, 0, 0, 10, 5, 0, 0, 5, 0, List.of());
         when(poller.poll(PollTrigger.MANUAL)).thenReturn(report);
 
         mockMvc.perform(post(FEEDS + "/refresh").header(AdminKeys.HEADER, AdminKeys.VALID))

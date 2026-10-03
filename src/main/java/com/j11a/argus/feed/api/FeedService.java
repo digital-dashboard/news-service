@@ -16,7 +16,7 @@ import com.j11a.argus.security.AdminAccess;
 import com.j11a.argus.source.Source;
 import com.j11a.argus.source.SourceResolver;
 import com.j11a.argus.source.SourceService;
-import com.j11a.argus.url.Links;
+import com.j11a.argus.url.StoredUrls;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import java.net.URI;
@@ -80,7 +80,7 @@ public class FeedService {
      * each commit on their own. Retries and conditional GET do not apply here: the create path makes one attempt.
      */
     public FeedResponse create(CreateFeedRequest request) {
-        String url = Links.clean(request.url());
+        String url = StoredUrls.clean(request.url());
         if (url == null) {
             throw new ApiException(ErrorCode.BAD_REQUEST, "The feed URL must be an absolute http or https URL.");
         }
@@ -94,7 +94,7 @@ public class FeedService {
         Source source = sources.findOrCreate(SourceResolver.keyFor(parsed.siteLink(), uri), parsed.siteLink());
         timer.completed(source.getKey(), loaded.bodyLength());
         long id = inserter.insert(new NewFeed(source.getId(), nameFor(request, parsed, source), url,
-                        Links.clean(parsed.siteLink()), request.topic(), languageOf(parsed)))
+                        StoredUrls.clean(parsed.siteLink()), request.topic(), languageOf(parsed)))
                 .orElseThrow(() -> conflict(inserter.findIdByUrl(url)));
         Feed feed = requireFeed(id);
         // The feed is committed, so a failed first ingest must not turn a successful create into an error.

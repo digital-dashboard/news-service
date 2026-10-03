@@ -41,6 +41,8 @@ public class IngestTelemetry {
     private static final String FETCHED = "fetched";
     private static final String UNEXPECTED_FETCH_REASON = "io";
     private static final String DECISION_INSERTED = "inserted";
+    private static final String DECISION_UPDATED = "updated";
+    private static final String DECISION_LINKED = "linked";
     private static final String DECISION_UNCHANGED = "unchanged";
     private static final String DECISION_SKIPPED = "skipped";
 
@@ -182,6 +184,10 @@ public class IngestTelemetry {
 
     void recordDecisions(String sourceKey, PersistCounts counts) {
         countDecision(sourceKey, DECISION_INSERTED, NO_REASON, counts.inserted());
+        for (Map.Entry<String, Integer> updated : counts.updated().entrySet()) {
+            countDecision(sourceKey, DECISION_UPDATED, updated.getKey(), updated.getValue());
+        }
+        countDecision(sourceKey, DECISION_LINKED, NO_REASON, counts.linked());
         countDecision(sourceKey, DECISION_UNCHANGED, NO_REASON, counts.unchanged());
         for (Map.Entry<String, Integer> skipped : counts.skipped().entrySet()) {
             countDecision(sourceKey, DECISION_SKIPPED, skipped.getKey(), skipped.getValue());

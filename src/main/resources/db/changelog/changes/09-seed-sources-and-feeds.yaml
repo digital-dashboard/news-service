@@ -1,0 +1,8 @@
+databaseChangeLog:
+  - changeSet:
+      id: 09-seed-sources-and-feeds
+      author: argus
+      context: "!test"
+      changes:
+        - sql:
+            sql: SELECT 1

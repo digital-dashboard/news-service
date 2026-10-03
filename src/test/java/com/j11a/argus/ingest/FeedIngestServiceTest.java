@@ -76,7 +76,8 @@ class FeedIngestServiceTest {
 
     @Test
     void dataQualityAndDecisionCountersAreRecordedOnlyAfterThePersistCommits() {
-        when(persister.persist(any(), any(), any())).thenReturn(new PersistCounts(1, 0, Map.of()));
+        when(persister.persist(any(), any(), any())).thenReturn(
+                new PersistCounts(1, Map.of(), 0, 0, Map.of(), Map.of()));
 
         service.ingestParsed(feed, oneEntryWithNothingOptional(), FETCHED_AT);
 
@@ -133,7 +134,8 @@ class FeedIngestServiceTest {
         ParsedFeed parsed = oneEntryWithNothingOptional();
         when(loader.load(URI.create("https://example.test/rss.xml"), validators, "example.test"))
                 .thenReturn(new FeedLoader.Loaded.Parsed(parsed, FETCHED_AT, newValidators));
-        when(persister.persist(any(), any(), any())).thenReturn(new PersistCounts(1, 0, Map.of()));
+        when(persister.persist(any(), any(), any())).thenReturn(
+                new PersistCounts(1, Map.of(), 0, 0, Map.of(), Map.of()));
 
         IngestReport report = service.refresh(1L);
 

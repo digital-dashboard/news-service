@@ -60,7 +60,10 @@ class ArticlePersisterTest {
                 List.of(entry("b", null), entry(null, null), entry("a", null)), FETCHED_AT);
 
         assertThat(counts.inserted()).isEqualTo(1);
+        assertThat(counts.updated()).isEmpty();
+        assertThat(counts.linked()).isZero();
         assertThat(counts.unchanged()).isEqualTo(1);
         assertThat(counts.skipped()).isEqualTo(Map.of(ArticlePersister.MISSING_IDENTITY, 1));
+        assertThat(counts.linkFallbacks()).containsValues(0, 0, 0);
     }
 }

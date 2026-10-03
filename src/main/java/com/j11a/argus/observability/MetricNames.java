@@ -18,6 +18,8 @@ public final class MetricNames {
     public static final String POLL = "argus.poll";
     public static final String POLL_LAST_SUCCESS = "argus.poll.last.success";
     public static final String SCHEDULED_JOB = "argus.scheduled.job";
+    public static final String INGEST_LINK_FALLBACK = "argus.ingest.link.fallback";
+    public static final String INGEST_LOCK_WAIT = "argus.ingest.lock.wait";
 
     private MetricNames() {
     }

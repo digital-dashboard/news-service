@@ -98,7 +98,7 @@ class IngestMetricsIT extends AbstractIntegrationTest {
         stub.serve("/missing-create.xml", 404, "text/plain", new byte[0]);
         long unknownBefore = timerCount(MetricNames.FETCH, "source", "unknown", "outcome", "failed", "reason", "http_status");
 
-        CreateFeedRequest request = new CreateFeedRequest(stub.baseUrl() + "/missing-create.xml", null, Topic.TECH);
+        CreateFeedRequest request = new CreateFeedRequest(stub.baseUrl() + "/missing-create.xml", null, Topic.TECH, null);
 
         assertThatThrownBy(() -> feedService.create(request)).isInstanceOf(ApiException.class);
 

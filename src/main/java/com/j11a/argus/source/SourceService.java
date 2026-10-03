@@ -1,6 +1,6 @@
 package com.j11a.argus.source;
 
-import com.j11a.argus.url.Links;
+import com.j11a.argus.url.StoredUrls;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -34,7 +34,7 @@ public class SourceService {
     public Source findOrCreate(String key, @Nullable String siteLink) {
         jdbc.sql(INSERT)
                 .param("key", key)
-                .param("homepage", Links.clean(siteLink))
+                .param("homepage", StoredUrls.clean(siteLink))
                 .param("now", OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))
                 .update();
         return sources.findByKey(key).orElseThrow();

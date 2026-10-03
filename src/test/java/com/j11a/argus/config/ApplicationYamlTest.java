@@ -156,4 +156,15 @@ class ApplicationYamlTest {
             assertThat(env.getProperty("argus.db.url")).isEqualTo("jdbc:postgresql://localhost:5432/argus");
         }, "spring.profiles.active=dev");
     }
+
+    @Test
+    void itProfileEnablesLiquibaseTestContext() {
+        withEnvironment(env -> assertThat(env.getProperty("spring.liquibase.contexts")).isEqualTo("test"),
+                "spring.profiles.active=it");
+    }
+
+    @Test
+    void defaultProfileHasNoLiquibaseContexts() {
+        withEnvironment(env -> assertThat(env.getProperty("spring.liquibase.contexts")).isNull());
+    }
 }

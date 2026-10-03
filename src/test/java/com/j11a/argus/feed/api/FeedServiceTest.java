@@ -91,7 +91,7 @@ class FeedServiceTest {
     }
 
     private static CreateFeedRequest request() {
-        return new CreateFeedRequest(URL, null, Topic.TECH);
+        return new CreateFeedRequest(URL, null, Topic.TECH, null);
     }
 
     @Test
@@ -164,7 +164,7 @@ class FeedServiceTest {
 
     @Test
     void aUrlThatIsNotAbsoluteHttpIsABadRequestBeforeAnyLookup() {
-        CreateFeedRequest request = new CreateFeedRequest("ftp://example.test/rss.xml", null, Topic.TECH);
+        CreateFeedRequest request = new CreateFeedRequest("ftp://example.test/rss.xml", null, Topic.TECH, null);
 
         assertThatThrownBy(() -> service.create(request))
                 .isInstanceOfSatisfying(ApiException.class,
@@ -202,7 +202,7 @@ class FeedServiceTest {
     void aRequestedNameIsStrippedAndWinsOverTheFeedTitle() {
         loads("Parsed title", null);
 
-        NewFeed inserted = insertedFeedFor(new CreateFeedRequest(URL, "  Custom name  ", Topic.TECH));
+        NewFeed inserted = insertedFeedFor(new CreateFeedRequest(URL, "  Custom name  ", Topic.TECH, null));
 
         assertThat(inserted.name()).isEqualTo("Custom name");
     }
@@ -211,7 +211,7 @@ class FeedServiceTest {
     void aBlankRequestedNameFallsBackToTheFeedTitle() {
         loads("Parsed title", null);
 
-        NewFeed inserted = insertedFeedFor(new CreateFeedRequest(URL, "   ", Topic.TECH));
+        NewFeed inserted = insertedFeedFor(new CreateFeedRequest(URL, "   ", Topic.TECH, null));
 
         assertThat(inserted.name()).isEqualTo("Parsed title");
     }

@@ -134,4 +134,19 @@ class SchemaIT extends AbstractIntegrationTest {
                 .query(Long.class).single();
         assertThat(indexCount).isOne();
     }
+
+    @Test
+    void contentHashColumnsExistAndAreNullable() {
+        String articleNullable = jdbcClient.sql("""
+                        SELECT is_nullable FROM information_schema.columns
+                        WHERE table_name = 'article' AND column_name = 'content_hash'""")
+                .query(String.class).single();
+        assertThat(articleNullable).isEqualTo("YES");
+
+        String articleFeedNullable = jdbcClient.sql("""
+                        SELECT is_nullable FROM information_schema.columns
+                        WHERE table_name = 'article_feed' AND column_name = 'content_hash'""")
+                .query(String.class).single();
+        assertThat(articleFeedNullable).isEqualTo("YES");
+    }
 }

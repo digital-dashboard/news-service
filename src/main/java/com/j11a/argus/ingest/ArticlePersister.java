@@ -5,6 +5,7 @@ import com.j11a.argus.article.InsertOutcome;
 import com.j11a.argus.article.NewArticle;
 import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.parse.ParsedEntry;
+import com.j11a.argus.ingest.dedup.LinkFallback;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
@@ -18,6 +19,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class ArticlePersister {
 
     static final String MISSING_IDENTITY = "missing_identity";
+    private static final Map<LinkFallback, Integer> NO_FALLBACKS = Map.of(
+            LinkFallback.GUID_REPLACED, 0,
+            LinkFallback.GUARDED_HOMEPAGE, 0,
+            LinkFallback.GUARDED_SHARED, 0);
 
     private record Keyed(String guidKey, ParsedEntry entry) {
     }
@@ -46,8 +51,8 @@ public class ArticlePersister {
             }
         }
         int skipped = entries.size() - keyed.size();
-        return new PersistCounts(inserted, keyed.size() - inserted,
-                skipped == 0 ? Map.of() : Map.of(MISSING_IDENTITY, skipped));
+        return new PersistCounts(inserted, Map.of(), 0, keyed.size() - inserted,
+                skipped == 0 ? Map.of() : Map.of(MISSING_IDENTITY, skipped), NO_FALLBACKS);
     }
 
     private static NewArticle toArticle(long sourceId, String guidKey, ParsedEntry entry, Instant fetchedAt) {

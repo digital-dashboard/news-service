@@ -78,7 +78,7 @@ class IngestObservabilityIT extends AbstractIntegrationTest {
     @Test
     void theClientSpanNeverCarriesTheFeedQueryString() {
         stub.serveFixture(PATH, "bbc-like-rss2.xml");
-        feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH + "?token=hunter2", null, Topic.WORLD));
+        feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH + "?token=hunter2", null, Topic.WORLD, null));
 
         assertThat(spans.spans()).allSatisfy(span ->
                 assertThat(span.getAttributes().asMap().values().toString()).doesNotContain("hunter2"));
