@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -48,6 +50,9 @@ class SourceControllerTest {
 
     @MockitoBean
     private SourceService sourceService;
+
+    @MockitoBean
+    private SourceMerger merger;
 
     private static MockHttpServletRequestBuilder adminPatch(String path, String body) {
         return patch(path).header(AdminKeys.HEADER, AdminKeys.VALID)
@@ -171,5 +176,63 @@ class SourceControllerTest {
         mockMvc.perform(adminPatch(SOURCES + "/99", "{\"name\":\"New BBC\"}"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("SOURCE_NOT_FOUND"));
+    }
+
+    private static MockHttpServletRequestBuilder adminMerge(long id, String body) {
+        return post(SOURCES + "/" + id + "/merge").header(AdminKeys.HEADER, AdminKeys.VALID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
+    @Test
+    void mergeReturnsTheCounts() throws Exception {
+        when(merger.merge(4L, 2L)).thenReturn(new SourceMergeResponse(4L, 2L, 2, 130, 12, 9));
+
+        mockMvc.perform(adminMerge(4, "{\"targetSourceId\":2}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sourceId").value(4))
+                .andExpect(jsonPath("$.targetSourceId").value(2))
+                .andExpect(jsonPath("$.feedsMoved").value(2))
+                .andExpect(jsonPath("$.articlesMoved").value(130))
+                .andExpect(jsonPath("$.articlesCollapsed").value(12))
+                .andExpect(jsonPath("$.linksFolded").value(9));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "{\"targetSourceId\":null}", "{\"targetSourceId\":-1}", "{\"targetSourceId\":0}"})
+    void mergeRejectsAMissingOrNonPositiveTarget(String body) throws Exception {
+        mockMvc.perform(adminMerge(4, body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        verifyNoInteractions(merger);
+    }
+
+    @Test
+    void mergeWithoutTheAdminKeyIs401() throws Exception {
+        mockMvc.perform(post(SOURCES + "/4/merge").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetSourceId\":2}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ADMIN_KEY_REQUIRED"));
+
+        verifyNoInteractions(merger);
+    }
+
+    @Test
+    void mergeOfAnUnknownSourceIs404() throws Exception {
+        when(merger.merge(4L, 2L)).thenThrow(new ApiException(ErrorCode.SOURCE_NOT_FOUND, "Source 4 does not exist."));
+
+        mockMvc.perform(adminMerge(4, "{\"targetSourceId\":2}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("SOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void mergeIntoItselfIs422() throws Exception {
+        when(merger.merge(4L, 4L)).thenThrow(new ApiException(ErrorCode.SOURCE_MERGE_INVALID, "no"));
+
+        mockMvc.perform(adminMerge(4, "{\"targetSourceId\":4}"))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.code").value("SOURCE_MERGE_INVALID"));
     }
 }
