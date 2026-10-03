@@ -1,4 +1,4 @@
-package com.j11a.argus.migration;
+package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -6,7 +6,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.j11a.argus.ingest.ContentHash;
-import com.j11a.argus.integration.AbstractIntegrationTest;
+import com.j11a.argus.migration.ArticleRekeyer;
+import com.j11a.argus.migration.RekeyArticlesChange;
+import com.j11a.argus.migration.RekeyReport;
 import com.j11a.argus.testsupport.ScratchDatabase;
 import java.sql.Connection;
 import java.sql.PreparedStatement;

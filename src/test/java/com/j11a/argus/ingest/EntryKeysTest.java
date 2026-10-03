@@ -28,7 +28,7 @@ class EntryKeysTest {
     }
 
     @Test
-    void bothNullGivesNull() {
+    void missingGuidAndLinkOrInvalidLinkGiveNoKey() {
         assertThat(EntryKeys.guidKey(null, null)).isNull();
         assertThat(EntryKeys.guidKey(" ", "ftp://example.com/a")).isNull();
         assertThat(EntryKeys.linkKey(null)).isNull();

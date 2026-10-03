@@ -2,6 +2,7 @@ package com.j11a.argus.url;
 
 import java.util.Set;
 
+/** Changing this list needs a re-key changeset: KeyStabilityTest guards it. */
 public final class TrackingParams {
 
     private static final Set<String> EXACT = Set.of("fbclid", "gclid", "mc_cid", "mc_eid", "cmpid", "ref");

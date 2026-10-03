@@ -6,21 +6,20 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
+import com.j11a.argus.feed.poll.PollTestHooks;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.observability.MeterSpec;
 import com.j11a.argus.observability.MetricCatalogue;
 import com.j11a.argus.observability.MetricNames;
 import com.j11a.argus.web.error.ApiException;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
-import io.micrometer.core.instrument.Timer;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 
 class IngestMetricsIT extends AbstractIntegrationTest {
 
@@ -38,27 +37,15 @@ class IngestMetricsIT extends AbstractIntegrationTest {
     @Autowired
     private MeterRegistry registry;
 
-    private double counter(String name, String... tags) {
-        Counter counter = registry.find(name).tags(tags).counter();
-        return counter == null ? 0 : counter.count();
-    }
-
-    private long timerCount(String name, String... tags) {
-        Timer timer = registry.find(name).tags(tags).timer();
-        return timer == null ? 0 : timer.count();
-    }
-
-    private long summaryCount(String name, String... tags) {
-        DistributionSummary summary = registry.find(name).tags(tags).summary();
-        return summary == null ? 0 : summary.count();
-    }
+    @Autowired
+    private ApplicationContext context;
 
     private double decisions(String decision, String reason) {
-        return counter(MetricNames.INGEST_ENTRIES, "source", SITE_SOURCE, "decision", decision, "reason", reason);
+        return meters().entries(SITE_SOURCE, decision, reason);
     }
 
     private double missing(String kind) {
-        return counter(MetricNames.PARSE_MISSING, "source", SITE_SOURCE, "kind", kind);
+        return meters().counter(MetricNames.PARSE_MISSING, "source", SITE_SOURCE, "kind", kind);
     }
 
     private FeedResponse create() {
@@ -67,9 +54,9 @@ class IngestMetricsIT extends AbstractIntegrationTest {
 
     @Test
     void creatingAFeedRecordsFetchIngestDecisionAndDataQualityMeters() {
-        long fetchBefore = timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "fetched", "reason", "none");
-        long sizeBefore = summaryCount(MetricNames.FETCH_SIZE, "source", SITE_SOURCE);
-        long ingestBefore = timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "completed");
+        long fetchBefore = meters().timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "fetched", "reason", "none");
+        long sizeBefore = meters().summaryCount(MetricNames.FETCH_SIZE, "source", SITE_SOURCE);
+        long ingestBefore = meters().timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "completed");
         double insertedBefore = decisions("inserted", "none");
         double skippedBefore = decisions("skipped", "missing_identity");
         double dateBefore = missing("date");
@@ -79,11 +66,11 @@ class IngestMetricsIT extends AbstractIntegrationTest {
 
         create();
 
-        assertThat(timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "fetched", "reason", "none"))
+        assertThat(meters().timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "fetched", "reason", "none"))
                 .isEqualTo(fetchBefore + 1);
-        assertThat(summaryCount(MetricNames.FETCH_SIZE, "source", SITE_SOURCE)).isEqualTo(sizeBefore + 1);
+        assertThat(meters().summaryCount(MetricNames.FETCH_SIZE, "source", SITE_SOURCE)).isEqualTo(sizeBefore + 1);
         assertThat(registry.find(MetricNames.FETCH_SIZE).summary().getId().getBaseUnit()).isEqualTo("bytes");
-        assertThat(timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "completed"))
+        assertThat(meters().timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "completed"))
                 .isEqualTo(ingestBefore + 1);
         assertThat(decisions("inserted", "none")).isEqualTo(insertedBefore + 2);
         assertThat(decisions("skipped", "missing_identity")).isEqualTo(skippedBefore + 1);
@@ -96,25 +83,25 @@ class IngestMetricsIT extends AbstractIntegrationTest {
     @Test
     void aFailedCreateFetchIsTaggedUnknown() {
         stub.serve("/missing-create.xml", 404, "text/plain", new byte[0]);
-        long unknownBefore = timerCount(MetricNames.FETCH, "source", "unknown", "outcome", "failed", "reason", "http_status");
+        long unknownBefore = meters().timerCount(MetricNames.FETCH, "source", "unknown", "outcome", "failed", "reason", "http_status");
 
         CreateFeedRequest request = new CreateFeedRequest(stub.baseUrl() + "/missing-create.xml", null, Topic.TECH, null);
 
         assertThatThrownBy(() -> feedService.create(request)).isInstanceOf(ApiException.class);
 
-        assertThat(timerCount(MetricNames.FETCH, "source", "unknown", "outcome", "failed", "reason", "http_status"))
+        assertThat(meters().timerCount(MetricNames.FETCH, "source", "unknown", "outcome", "failed", "reason", "http_status"))
                 .isEqualTo(unknownBefore + 1);
     }
 
     @Test
     void refreshingRecordsUnchangedEntriesAndTagsTheFetchWithTheStoredSource() {
         FeedResponse feed = create();
-        long fetchBefore = timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "fetched", "reason", "none");
+        long fetchBefore = meters().timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "fetched", "reason", "none");
         double unchangedBefore = decisions("unchanged", "none");
 
         ingestService.refresh(feed.id());
 
-        assertThat(timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "fetched", "reason", "none"))
+        assertThat(meters().timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "fetched", "reason", "none"))
                 .isEqualTo(fetchBefore + 1);
         assertThat(decisions("unchanged", "none")).isEqualTo(unchangedBefore + 2);
     }
@@ -123,23 +110,23 @@ class IngestMetricsIT extends AbstractIntegrationTest {
     void aFailedFetchIsTaggedWithItsReasonAndRetriesAreCountedUnderStoredSource() {
         FeedResponse feed = create();
         stub.serve(PATH, 503, "text/plain", new byte[0]);
-        long before = timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "failed",
+        long before = meters().timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "failed",
                 "reason", "http_status");
-        long failedIngestBefore = timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "failed");
-        double retriesBefore = counter(MetricNames.FETCH_RETRY, "source", SITE_SOURCE);
+        long failedIngestBefore = meters().timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "failed");
+        double retriesBefore = meters().counter(MetricNames.FETCH_RETRY, "source", SITE_SOURCE);
 
         ingestService.refresh(feed.id());
 
-        assertThat(timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "failed", "reason", "http_status"))
+        assertThat(meters().timerCount(MetricNames.FETCH, "source", SITE_SOURCE, "outcome", "failed", "reason", "http_status"))
                 .isEqualTo(before + 1);
-        assertThat(timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "failed"))
+        assertThat(meters().timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "failed"))
                 .isEqualTo(failedIngestBefore + 1);
-        assertThat(counter(MetricNames.FETCH_RETRY, "source", SITE_SOURCE)).isEqualTo(retriesBefore + MAX_RETRIES);
+        assertThat(meters().counter(MetricNames.FETCH_RETRY, "source", SITE_SOURCE)).isEqualTo(retriesBefore + MAX_RETRIES);
     }
 
     @Test
     void everyCataloguedMeterExistsWithExactlyTheCataloguedTags() {
-        create();
+        registerEveryCataloguedMeter();
 
         for (MeterSpec spec : MetricCatalogue.all()) {
             Set<Meter> meters = registry.getMeters().stream()
@@ -149,6 +136,18 @@ class IngestMetricsIT extends AbstractIntegrationTest {
             assertThat(meters).allSatisfy(meter -> assertThat(tagKeys(meter))
                     .as(spec.name()).containsExactlyInAnyOrderElementsOf(spec.tags()));
         }
+    }
+
+    /**
+     * The create path registers fetch, ingest, decision and data-quality meters. A failing refresh adds
+     * argus.fetch.retry, and the scheduled poll adds argus.poll and argus.scheduled.job (argus.poll.last.success is
+     * a gauge registered at startup).
+     */
+    private void registerEveryCataloguedMeter() {
+        FeedResponse feed = create();
+        stub.serve(PATH, 503, "text/plain", new byte[0]);
+        ingestService.refresh(feed.id());
+        PollTestHooks.runScheduledPoll(context);
     }
 
     @Test

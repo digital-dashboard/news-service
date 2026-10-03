@@ -4,7 +4,10 @@ import java.net.URI;
 import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 
-/** Light normalisation for URLs that are stored and fetched (feed, site and homepage URLs). Article identity keys use LinkCleaner. */
+/**
+ * Light normalisation for URLs that are stored and fetched (feed, site and homepage URLs).
+ * Article identity keys use LinkCleaner.
+ */
 public final class StoredUrls {
 
     private StoredUrls() {
@@ -13,6 +16,12 @@ public final class StoredUrls {
     /** Trims, lowercases scheme and host, drops the fragment; null unless the link is an absolute http(s) URL. */
     public static @Nullable String clean(@Nullable String link) {
         return HttpUrls.parseHttp(link).map(StoredUrls::rebuild).orElse(null);
+    }
+
+    /** clean, then reduced to scheme, host, port and path: for URLs that anonymous callers can read. */
+    public static @Nullable String cleanPublic(@Nullable String link) {
+        String cleaned = clean(link);
+        return cleaned == null ? null : HttpUrls.redact(cleaned);
     }
 
     // Built from raw components: the multi-argument URI constructors would re-encode escapes.

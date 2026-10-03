@@ -17,7 +17,7 @@ class ArticleFilterTest {
     }
 
     @Test
-    void retainsProvidedSets() {
+    void filterKeepsTheTopicAndCountrySetsItWasGiven() {
         ArticleFilter filter = new ArticleFilter(Set.of(Topic.NEWS), Set.of("CA"));
 
         assertThat(filter.topics()).containsExactly(Topic.NEWS);

@@ -8,12 +8,8 @@ import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.IngestReport;
-import com.j11a.argus.observability.MetricNames;
 import com.j11a.argus.source.SourceLock;
 import com.j11a.argus.testsupport.FeedStubServer;
-import com.j11a.argus.testsupport.IngestMeters;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -44,9 +40,6 @@ class ConcurrentIngestIT extends AbstractIntegrationTest {
     @Autowired
     private PlatformTransactionManager txManager;
 
-    @Autowired
-    private MeterRegistry registry;
-
     private static byte[] rss(int items) {
         StringBuilder xml = new StringBuilder("<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>T</title>")
                 .append("<link>https://").append(SOURCE).append("/</link><description>d</description>");
@@ -75,7 +68,8 @@ class ConcurrentIngestIT extends AbstractIntegrationTest {
                 FeedResponse b = createSmallFeed("/conc/b.xml");
                 serveRss("/conc/a.xml", ITEMS);
                 serveRss("/conc/b.xml", ITEMS);
-                long waitsBefore = new IngestMeters(registry).lockWaits(SOURCE);
+                long waitsBefore = meters().lockWaits(SOURCE);
+                double conflictsBefore = meters().entries(SOURCE, "updated", "insert_conflict");
                 CyclicBarrier barrier = new CyclicBarrier(2);
 
                 List<Future<IngestReport>> reports = List.of(a.id(), b.id()).stream()
@@ -84,16 +78,23 @@ class ConcurrentIngestIT extends AbstractIntegrationTest {
                             return ingestService.refresh(id);
                         }))
                         .toList();
+                int insertedByBoth = 0;
                 for (Future<IngestReport> report : reports) {
-                    assertThat(report.get(WAIT_LIMIT.toSeconds(), TimeUnit.SECONDS).outcome())
-                            .isEqualTo(IngestReport.Outcome.COMPLETED);
+                    IngestReport result = report.get(WAIT_LIMIT.toSeconds(), TimeUnit.SECONDS);
+                    assertThat(result.outcome()).isEqualTo(IngestReport.Outcome.COMPLETED);
+                    insertedByBoth += result.inserted();
                 }
 
+                // Serialised: the first feed inserts every new item, the second only links to them. Both feeds
+                // already hold item 0 from createSmallFeed. Without the lock the race losers would instead be
+                // absorbed as insert conflicts and the sum would fall short.
+                assertThat(insertedByBoth).isEqualTo(ITEMS - 1);
+                assertThat(meters().entries(SOURCE, "updated", "insert_conflict")).isEqualTo(conflictsBefore);
                 assertThat(jdbcClient.sql("""
                         SELECT count(*) FROM (SELECT 1 FROM article GROUP BY source_id, guid_key
                         HAVING count(*) > 1) duplicates""").query(Long.class).single()).isZero();
                 assertThat(jdbcClient.sql("SELECT count(*) FROM article").query(Long.class).single()).isEqualTo(ITEMS);
-                assertThat(new IngestMeters(registry).lockWaits(SOURCE)).isGreaterThanOrEqualTo(waitsBefore + 2);
+                assertThat(meters().lockWaits(SOURCE)).isGreaterThanOrEqualTo(waitsBefore + 2);
             }
         }
     }
@@ -102,7 +103,7 @@ class ConcurrentIngestIT extends AbstractIntegrationTest {
     void aRefreshWaitsForAHeldSourceLockAndTheWaitIsRecorded() throws Exception {
         FeedResponse feed = createSmallFeed("/conc/held.xml");
         long sourceId = feed.source().id();
-        double waitedBefore = lockWaitSeconds();
+        double waitedBefore = meters().lockWaitSeconds(SOURCE);
         CountDownLatch holding = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         TransactionTemplate tx = new TransactionTemplate(txManager);
@@ -125,15 +126,8 @@ class ConcurrentIngestIT extends AbstractIntegrationTest {
             holder.get(WAIT_LIMIT.toSeconds(), TimeUnit.SECONDS);
         }
 
-        Timer timer = registry.find(MetricNames.INGEST_LOCK_WAIT).tag("source", SOURCE).timer();
-        assertThat(timer).isNotNull();
-        assertThat(timer.max(TimeUnit.NANOSECONDS)).isGreaterThan(0);
-        assertThat(lockWaitSeconds()).isGreaterThan(waitedBefore);
-    }
-
-    private double lockWaitSeconds() {
-        Timer timer = registry.find(MetricNames.INGEST_LOCK_WAIT).tag("source", SOURCE).timer();
-        return timer == null ? 0 : timer.totalTime(TimeUnit.SECONDS);
+        assertThat(meters().lockWaitMaxNanos(SOURCE)).isGreaterThan(0);
+        assertThat(meters().lockWaitSeconds(SOURCE)).isGreaterThan(waitedBefore);
     }
 
     private long advisoryWaiters() {

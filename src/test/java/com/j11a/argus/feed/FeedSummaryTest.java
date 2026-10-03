@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 class FeedSummaryTest {
 
     @Test
-    void mapsFromFeed() {
+    void summaryCopiesIdNameAndTopicFromTheFeed() {
         Feed feed = mock(Feed.class);
         when(feed.getId()).thenReturn(42L);
         when(feed.getName()).thenReturn("Tech News");

@@ -16,8 +16,8 @@ public record IngestReport(
     public IngestReport {
         if (entriesSeen != inserted + updated + linked + unchanged + skipped) {
             throw new IllegalArgumentException(
-                    "entriesSeen (%d) must equal inserted (%d) + updated (%d) + linked (%d) + unchanged (%d) + skipped (%d)"
-                            .formatted(entriesSeen, inserted, updated, linked, unchanged, skipped));
+                    ("entriesSeen (%d) must equal inserted (%d) + updated (%d) + linked (%d) + unchanged (%d)"
+                            + " + skipped (%d)").formatted(entriesSeen, inserted, updated, linked, unchanged, skipped));
         }
     }
 

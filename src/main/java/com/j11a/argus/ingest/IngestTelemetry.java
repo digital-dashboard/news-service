@@ -26,13 +26,17 @@ import java.util.function.Supplier;
 import org.springframework.stereotype.Component;
 
 /**
- * Observations (and so timers) exist only for ingest and fetch. Parse and persist are bare spans, so they add no
- * uncatalogued timers. Feed and source ids are span attributes only, never meter tags; the feed-health gauges, which
- * carry a feed_id tag, are the one exception. The argus.poll timer lives in PollingTelemetry.
+ * Observations (and so timers) exist only for ingest and fetch. Parse, lock wait, resolve and persist are bare spans,
+ * so they add no uncatalogued timers; the lock-wait timer is a plain catalogued Timer. Feed and source ids are span
+ * attributes only, never meter tags; the feed-health gauges, which carry a feed_id tag, are the one exception. The
+ * argus.poll timer lives in PollingTelemetry.
  */
 @Component
 public class IngestTelemetry {
 
+    static final String RESOLVE_SPAN = "argus.resolve";
+    static final String LOCK_WAIT_SPAN = "argus.lock.wait";
+    static final String SOURCE_ID_ATTRIBUTE = "source.id";
     static final String NO_REASON = "none";
     static final String NOT_MODIFIED = "not_modified";
     private static final String UNKNOWN_SOURCE = "unknown";
@@ -62,7 +66,7 @@ public class IngestTelemetry {
         Observation observation = Observation.createNotStarted(MetricNames.INGEST, observations)
                 .lowCardinalityKeyValue(SOURCE, feed.getSource().getKey())
                 .highCardinalityKeyValue("feed.id", String.valueOf(feed.getId()))
-                .highCardinalityKeyValue("source.id", String.valueOf(feed.getSource().getId()))
+                .highCardinalityKeyValue(SOURCE_ID_ATTRIBUTE, String.valueOf(feed.getSource().getId()))
                 .start();
         String outcome = FAILED;
         try (Observation.Scope ignored = observation.openScope()) {
@@ -159,8 +163,8 @@ public class IngestTelemetry {
     }
 
     Duration lockWait(String sourceKey, long sourceId, Supplier<Duration> acquire) {
-        Span span = tracer.nextSpan().name("argus.lock.wait")
-                .tag("source.id", String.valueOf(sourceId))
+        Span span = tracer.nextSpan().name(LOCK_WAIT_SPAN)
+                .tag(SOURCE_ID_ATTRIBUTE, String.valueOf(sourceId))
                 .start();
         try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
             Duration wait = acquire.get();
@@ -203,7 +207,8 @@ public class IngestTelemetry {
         countMissing(sourceKey, "author", entries, e -> e.author() == null);
     }
 
-    private void countMissing(String sourceKey, String kind, List<ParsedEntry> entries, Predicate<ParsedEntry> missing) {
+    private void countMissing(
+            String sourceKey, String kind, List<ParsedEntry> entries, Predicate<ParsedEntry> missing) {
         long count = entries.stream().filter(missing).count();
         if (count > 0) {
             meters.counter(MetricNames.PARSE_MISSING, SOURCE, sourceKey, KIND, kind).increment(count);
@@ -230,6 +235,7 @@ public class IngestTelemetry {
     }
 
     void recordLinkFallbacks(String sourceKey, Map<LinkFallback, Integer> fallbacks) {
+        // Zero increments keep every outcome's series present for the metric catalogue and the dashboard.
         for (LinkFallback fallback : LinkFallback.values()) {
             int count = fallbacks.getOrDefault(fallback, 0);
             meters.counter(MetricNames.INGEST_LINK_FALLBACK, SOURCE, sourceKey, OUTCOME, fallback.tag())

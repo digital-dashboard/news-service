@@ -64,7 +64,6 @@ class EntryDedupResolverTest {
         Instant t1 = Instant.parse("2026-10-03T10:00:00Z");
         Instant t2 = Instant.parse("2026-10-03T11:00:00Z");
 
-        // pos 0 has earlier t1; pos 1 and pos 2 tie on t2; pos 2 has higher position so pos 2 survives
         ParsedEntry e0 = entry("g1", "https://example.com/1", "T0", null, t1);
         ParsedEntry e1 = entry("g1", "https://example.com/1", "T1", null, t2);
         ParsedEntry e2 = entry("g1", "https://example.com/1", "T2", null, t2);
@@ -109,7 +108,7 @@ class EntryDedupResolverTest {
     }
 
     @Test
-    void rootLinkIsGuarded() {
+    void rootLinkIsGuardedAndCountedGuardedHomepage() {
         ParsedEntry e = entry("g1", "https://example.com/", "Root", null, null);
         DedupInput input = new DedupInput(1L, List.of(e), null, now, lookup);
 
@@ -136,12 +135,10 @@ class EntryDedupResolverTest {
 
     @Test
     void lookupCalledOnceNeverWithGuardedKeysAndSkippedWhenBothSetsEmpty() {
-        // Both sets empty when all entries have missing identity
         DedupInput emptyInput = new DedupInput(1L, List.of(entry(null, null, "X", null, null)), null, now, lookup);
         resolver.resolve(emptyInput);
         assertThat(lookup.guidKeyCalls).isEmpty();
 
-        // Called once with non-guarded keys
         ParsedEntry e1 = entry("g1", "https://example.com/1", "A1", null, null);
         ParsedEntry e2 = entry("g2", "https://example.com/", "A2", null, null); // root link
         DedupInput input = new DedupInput(1L, List.of(e1, e2), null, now, lookup);
@@ -194,7 +191,6 @@ class EntryDedupResolverTest {
         EntryDecision.Update update = (EntryDecision.Update) res.decisions().get(0);
         assertThat(update.articleId()).isEqualTo(100L);
         assertThat(update.reason()).isEqualTo(UpdateReason.CONTENT_CHANGED);
-        assertThat(update.wasLinked()).isTrue();
         assertThat(update.guidReplaced()).isFalse();
     }
 
@@ -212,7 +208,6 @@ class EntryDedupResolverTest {
         assertThat(res.decisions().get(0)).isInstanceOf(EntryDecision.Update.class);
         EntryDecision.Update update = (EntryDecision.Update) res.decisions().get(0);
         assertThat(update.reason()).isEqualTo(UpdateReason.TIMESTAMP_ONLY);
-        assertThat(update.wasLinked()).isTrue();
     }
 
     @Test
@@ -220,13 +215,10 @@ class EntryDedupResolverTest {
         Instant t1 = Instant.parse("2026-10-03T10:00:00Z");
         String hash = ContentHash.of("Title", "excerpt", List.of("news"));
 
-        // Equal
         ParsedEntry eEqual = entry("g1", "https://example.com/1", "Title", null, t1);
         lookup.returnArticles = List.of(new ExistingArticle(100L, "g1", "https://example.com/1", t1, true, hash));
         Resolution res1 = resolver.resolve(new DedupInput(1L, List.of(eEqual), null, now, lookup));
         assertThat(res1.decisions().get(0)).isInstanceOf(EntryDecision.Unchanged.class);
-
-        // Earlier
         Instant tEarlier = Instant.parse("2026-10-03T09:00:00Z");
         ParsedEntry eEarlier = entry("g1", "https://example.com/1", "Title", null, tEarlier);
         Resolution res2 = resolver.resolve(new DedupInput(1L, List.of(eEarlier), null, now, lookup));
@@ -239,7 +231,6 @@ class EntryDedupResolverTest {
         Instant t2 = Instant.parse("2026-10-03T11:00:00Z");
         String hash = ContentHash.of("Title", "excerpt", List.of("news"));
 
-        // Case A: time did not advance -> Link
         ParsedEntry eSameTime = entry("g1", "https://example.com/1", "Title", null, t1);
         lookup.returnArticles = List.of(new ExistingArticle(100L, "g1", "https://example.com/1", t1, false, null));
         Resolution resA = resolver.resolve(new DedupInput(1L, List.of(eSameTime), null, now, lookup));
@@ -247,14 +238,11 @@ class EntryDedupResolverTest {
         EntryDecision.Link link = (EntryDecision.Link) resA.decisions().get(0);
         assertThat(link.articleId()).isEqualTo(100L);
         assertThat(link.guidReplaced()).isFalse();
-
-        // Case B: time advanced -> Update(TIMESTAMP_ONLY, wasLinked=false)
         ParsedEntry eNewer = entry("g1", "https://example.com/1", "Title", null, t2);
         Resolution resB = resolver.resolve(new DedupInput(1L, List.of(eNewer), null, now, lookup));
         assertThat(resB.decisions().get(0)).isInstanceOf(EntryDecision.Update.class);
         EntryDecision.Update update = (EntryDecision.Update) resB.decisions().get(0);
         assertThat(update.reason()).isEqualTo(UpdateReason.TIMESTAMP_ONLY);
-        assertThat(update.wasLinked()).isFalse();
     }
 
     @Test
@@ -275,9 +263,6 @@ class EntryDedupResolverTest {
 
     @Test
     void guidWinsOverLinkThatPointsAtDifferentArticle() {
-        // Entry has guid g1 and link l1.
-        // Article 1 has guid g1, link other-link.
-        // Article 2 has guid other-guid, link l1.
         ParsedEntry e = entry("g1", "https://example.com/l1", "Title", null, null);
         lookup.returnArticles = List.of(
                 new ExistingArticle(1L, "g1", "https://example.com/other", null, true, "hash1"),
@@ -287,7 +272,6 @@ class EntryDedupResolverTest {
 
         Resolution res = resolver.resolve(input);
 
-        // Matches Article 1 by GUID, not Article 2
         assertThat(res.decisions().get(0)).isInstanceOf(EntryDecision.Update.class);
         EntryDecision.Update update = (EntryDecision.Update) res.decisions().get(0);
         assertThat(update.articleId()).isEqualTo(1L);
@@ -296,25 +280,37 @@ class EntryDedupResolverTest {
 
     @Test
     void articleClaimedByGuidIsNotLinkMatchedByAnotherEntry() {
-        // Entry 1 has guid g1 -> matches article 1 by guid.
-        // Entry 2 has guid g2 (no match) and link l1 -> points to article 1.
-        ParsedEntry e1 = entry("g1", "https://example.com/l1", "Title 1", null, null);
-        ParsedEntry e2 = entry("g2", "https://example.com/l1", "Title 2", null, null);
+        String oldLink = "https://example.com/old";
+        ParsedEntry e1 = entry("g1", "https://example.com/new", "Title 1", null, null);
+        ParsedEntry e2 = entry("g2", oldLink, "Title 2", null, null);
         String hash1 = ContentHash.of("Title 1", "excerpt", List.of("news"));
-        lookup.returnArticles = List.of(
-                new ExistingArticle(1L, "g1", "https://example.com/l1", null, true, hash1)
-        );
-        DedupInput input = new DedupInput(1L, List.of(e1, e2), null, now, lookup);
+        lookup.returnArticles = List.of(new ExistingArticle(1L, "g1", EntryKeys.linkKey(oldLink), null, true, hash1));
 
-        Resolution res = resolver.resolve(input);
+        Resolution res = resolver.resolve(new DedupInput(1L, List.of(e1, e2), null, now, lookup));
 
-        // e1 matches article 1
+        assertThat(lookup.linkKeyCalls.get(0)).contains(EntryKeys.linkKey(oldLink));
         assertThat(res.decisions().get(0)).isInstanceOf(EntryDecision.Unchanged.class);
         assertThat(((EntryDecision.Unchanged) res.decisions().get(0)).articleId()).isEqualTo(1L);
-
-        // e2 cannot claim article 1, falls back to guarded_shared
         assertThat(res.decisions().get(1)).isInstanceOf(EntryDecision.Insert.class);
         assertThat(res.linkFallbacks().get(LinkFallback.GUARDED_SHARED)).isEqualTo(1);
+        assertThat(res.linkFallbacks().get(LinkFallback.GUID_REPLACED)).isZero();
+    }
+
+    @Test
+    void sameEntryWithoutAGuidClaimantTakesOverTheLinkMatchedArticle() {
+        String oldLink = "https://example.com/old";
+        ParsedEntry e2 = entry("g2", oldLink, "Title 2", null, null);
+        String hash = ContentHash.of("Title 2", "excerpt", List.of("news"));
+        lookup.returnArticles = List.of(new ExistingArticle(1L, "g1", EntryKeys.linkKey(oldLink), null, true, hash));
+
+        Resolution res = resolver.resolve(new DedupInput(1L, List.of(e2), null, now, lookup));
+
+        assertThat(res.decisions().get(0)).isInstanceOf(EntryDecision.Unchanged.class);
+        EntryDecision.Unchanged decision = (EntryDecision.Unchanged) res.decisions().get(0);
+        assertThat(decision.articleId()).isEqualTo(1L);
+        assertThat(decision.guidReplaced()).isTrue();
+        assertThat(res.linkFallbacks().get(LinkFallback.GUID_REPLACED)).isEqualTo(1);
+        assertThat(res.linkFallbacks().get(LinkFallback.GUARDED_SHARED)).isZero();
     }
 
     @Test
@@ -348,7 +344,7 @@ class EntryDedupResolverTest {
     }
 
     @Test
-    void linkFallbacksAlwaysHas3Keys() {
+    void everyLinkFallbackCounterIsPresentEvenWithNoEntries() {
         DedupInput input = new DedupInput(1L, List.of(), null, now, lookup);
         Resolution res = resolver.resolve(input);
 
@@ -361,7 +357,7 @@ class EntryDedupResolverTest {
     }
 
     @Test
-    void invariantTotalDecisionsEqualsEntriesIn() {
+    void everyEntryGetsExactlyOneDecision() {
         ParsedEntry e0 = entry("g1", "https://example.com/1", "A", null, null);
         ParsedEntry e1 = entry(null, null, "B", null, null);
         ParsedEntry e2 = entry("g2", "https://example.com/2", "C", null, null);

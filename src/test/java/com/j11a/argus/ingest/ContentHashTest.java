@@ -21,6 +21,15 @@ class ContentHashTest {
     }
 
     @Test
+    void unicodeLineSeparatorsCollapseLikeOrdinaryWhitespace() {
+        String base = ContentHash.of("Breaking News", "Excerpt", List.of());
+
+        assertThat(ContentHash.of("Breaking\u2028News", "Excerpt", List.of())).isEqualTo(base);
+        assertThat(ContentHash.of("Breaking\u0085News", "Excerpt", List.of())).isEqualTo(base);
+        assertThat(ContentHash.of("Breaking \u2028\u0085 News", "Excerpt", List.of())).isEqualTo(base);
+    }
+
+    @Test
     void categoryOrderDuplicatesAndCaseVariantsHashTheSame() {
         String base = ContentHash.of("Title", "Excerpt", List.of("News", "Sports"));
         String reordered = ContentHash.of("Title", "Excerpt", List.of("Sports", "News"));

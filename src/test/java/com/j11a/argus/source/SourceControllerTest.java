@@ -143,32 +143,10 @@ class SourceControllerTest {
     }
 
     @Test
-    void patchEmptyBodyIs400() throws Exception {
-        mockMvc.perform(adminPatch(SOURCES + "/1", "{}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
-
+    void patchWithUnreadableBodyIs400() throws Exception {
         mockMvc.perform(adminPatch(SOURCES + "/1", ""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
-        verifyNoInteractions(sourceService);
-    }
-
-    @Test
-    void patchInvalidCountryIs400() throws Exception {
-        mockMvc.perform(adminPatch(SOURCES + "/1", "{\"country\":\"UK\"}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
-                .andExpect(jsonPath("$.errors[0].field").value("country"));
-        verifyNoInteractions(sourceService);
-    }
-
-    @Test
-    void patchBlankNameIs400() throws Exception {
-        mockMvc.perform(adminPatch(SOURCES + "/1", "{\"name\":\"   \"}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
-                .andExpect(jsonPath("$.errors[0].field").value("name"));
         verifyNoInteractions(sourceService);
     }
 

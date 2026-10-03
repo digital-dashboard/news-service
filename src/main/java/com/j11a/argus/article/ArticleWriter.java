@@ -10,17 +10,20 @@ import org.springframework.stereotype.Component;
 @Component
 public class ArticleWriter {
 
+    /** inserted is true for a fresh row: xmax = 0 tells it apart from the ON CONFLICT path, which rewrites the row. */
     public record WriteResult(long id, boolean inserted) {}
 
     private static final String INSERT_ARTICLE = """
-            INSERT INTO article (source_id, guid_key, raw_guid, link_key, link, content_hash, title, excerpt, author, image_url,
-                                 categories, published_at, updated_at_upstream, effective_at, fetched_at, modified_at)
+            INSERT INTO article (source_id, guid_key, raw_guid, link_key, link, content_hash, title, excerpt, author,
+                                 image_url, categories, published_at, updated_at_upstream, effective_at, fetched_at,
+                                 modified_at)
             VALUES (:sourceId, :guidKey, :rawGuid, :linkKey, :link, :contentHash, :title, :excerpt, :author, :imageUrl,
                     :categories, :publishedAt, :updatedAtUpstream, :effectiveAt, :fetchedAt, :modifiedAt)
             ON CONFLICT (source_id, guid_key) DO UPDATE SET modified_at = EXCLUDED.modified_at
             RETURNING id, (xmax = 0) AS inserted
             """;
 
+    // COALESCE keeps stored values that a feed omits; effective_at only moves forward, and only for dated entries.
     private static final String REWRITE_CONTENT = """
             UPDATE article SET link_key = COALESCE(:linkKey, link_key), link = COALESCE(:link, link),
               title = :title, excerpt = :excerpt, author = COALESCE(:author, author),
@@ -43,6 +46,7 @@ public class ArticleWriter {
             UPDATE article SET guid_key = :guidKey, raw_guid = :rawGuid, modified_at = :now WHERE id = :id
             """;
 
+    // IS DISTINCT FROM skips the write when the feed's hash has not changed.
     private static final String LINK_FEED = """
             INSERT INTO article_feed (article_id, feed_id, first_seen_at, content_hash)
             VALUES (:articleId, :feedId, :now, :contentHash)

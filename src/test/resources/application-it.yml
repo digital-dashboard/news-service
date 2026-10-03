@@ -1,5 +1,6 @@
 spring:
   liquibase:
+    # The test context skips the production seed changeset (09), so ITs start from empty tables.
     contexts: test
   jpa:
     hibernate:

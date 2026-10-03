@@ -17,6 +17,7 @@ public final class LinkCleaner {
     private LinkCleaner() {
     }
 
+    /** Strips a leading www./m./amp. only when the rest is not a public suffix, so www.co.uk stays as it is. */
     public static @Nullable String clean(@Nullable String link) {
         return HttpUrls.parseHttp(link).map(LinkCleaner::rebuild).orElse(null);
     }

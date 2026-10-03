@@ -88,12 +88,10 @@ On shutdown the in-flight poll is interrupted rather than awaited; see the worst
 `POST /feeds/{id}/refresh` returns an `IngestReport` and `POST /feeds/refresh` an `AggregatePollReport` with the same counters summed over all feeds. The counters are `entriesSeen`, `inserted`, `updated`, `linked`, `unchanged` and `skipped`, and they always add up: `entriesSeen` is the sum of the other five. The same decisions are the `decision` tag of `argus_ingest_entries_total`, with a `reason` tag where one applies:
 
 - `inserted`: a new article.
-- `updated`: an existing article changed. `content_changed` (title, excerpt or categories differ, so the article is rewritten), `timestamp_only` (only the upstream update time moved) or `insert_conflict` (a concurrent insert won the race and this entry was merged into its row).
-- `linked`: the article already existed through another feed of the same source, so this feed is linked to it.
+- `updated`: an existing article changed. `content_changed` (title, excerpt or categories differ, so the article is rewritten), `timestamp_only` (only the upstream update time moved) or `insert_conflict` (the article already existed under that GUID, this feed was linked to it and its content left untouched).
+- `linked`: the entry matched an existing article first seen through another feed of the same source, so this feed is linked to it, unless its upstream update time is newer (then it is `updated{timestamp_only}`).
 - `unchanged`: already stored through this feed with nothing new.
 - `skipped`: not stored. `missing_identity` (no usable GUID or link) or `batch_duplicate` (a repeat of an earlier entry in the same download).
-
-Before phase 4, repeats within one download counted as `unchanged`. They are now `skipped{batch_duplicate}`.
 
 Deduplication is per source. Ingest takes a Postgres advisory lock per source, so feeds of one source ingest one at a time, and inserts use `ON CONFLICT`. An entry matches an existing article by GUID first, then by cleaned link; the link fallback is guarded against homepage links and links shared by several entries in the same batch, and replaces the stored GUID when it matches. Edits are detected by a per-feed content hash, or by a newer upstream update time. An article is linked only to feeds of its own source.
 
@@ -106,7 +104,6 @@ Liquibase changeset `09-seed-sources-and-feeds` adds 17 sources and 20 feeds (co
 ## Recorded deviations
 
 - OpenAPI annotations for the phase 4 endpoints are deferred to phase 13.
-- The tracking-parameter list is not configurable.
 
 ## Observability
 

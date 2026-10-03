@@ -2,7 +2,7 @@ package com.j11a.argus.article;
 
 import com.j11a.argus.feed.Topic;
 import com.j11a.argus.source.CountryCodes;
-import com.j11a.argus.web.error.ApiException;
+import com.j11a.argus.web.PageParams;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.util.List;
@@ -19,10 +19,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/articles")
 public class ArticleController {
 
-    static final int MAX_PAGE_SIZE = 100;
-    // The row offset (page * size) must fit the int that the JPA query takes.
-    private static final String PAGE_TOO_DEEP = "page is too large for this size";
-
     private final ArticleQueryService articles;
 
     public ArticleController(ArticleQueryService articles) {
@@ -35,10 +31,8 @@ public class ArticleController {
             @RequestParam(required = false) @Nullable List<Topic> topic,
             @RequestParam(required = false) @Nullable List<String> country,
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size) {
-        if ((long) page * size > Integer.MAX_VALUE) {
-            throw ApiException.validationFailed("page", PAGE_TOO_DEEP);
-        }
+            @RequestParam(defaultValue = "20") @Min(1) @Max(PageParams.MAX_PAGE_SIZE) int size) {
+        PageParams.requireReachable(page, size);
         Set<Topic> topics = topic == null ? Set.of() : Set.copyOf(topic);
         Set<String> countries = normaliseCountries(country);
         ArticleFilter filter = new ArticleFilter(topics, countries);

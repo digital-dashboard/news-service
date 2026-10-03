@@ -71,7 +71,10 @@ public final class ArticleRekeyer {
     }
 
     private List<ArticleRow> readArticles(Connection c) throws SQLException {
-        String sql = "SELECT id, source_id, guid_key, raw_guid, link, title, excerpt, categories FROM article ORDER BY source_id, id";
+        String sql = """
+                SELECT id, source_id, guid_key, raw_guid, link, title, excerpt, categories
+                FROM article ORDER BY source_id, id
+                """;
         List<ArticleRow> rows = new ArrayList<>();
         try (PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setFetchSize(1000);
@@ -110,7 +113,8 @@ public final class ArticleRekeyer {
         String sql = """
                 INSERT INTO article_feed (article_id, feed_id, first_seen_at)
                 SELECT ?, feed_id, first_seen_at FROM article_feed WHERE article_id = ?
-                ON CONFLICT (article_id, feed_id) DO UPDATE SET first_seen_at = LEAST(article_feed.first_seen_at, EXCLUDED.first_seen_at)
+                ON CONFLICT (article_id, feed_id) DO UPDATE
+                SET first_seen_at = LEAST(article_feed.first_seen_at, EXCLUDED.first_seen_at)
                 """;
         int linksFolded = 0;
         try (PreparedStatement ps = c.prepareStatement(sql)) {
@@ -139,7 +143,8 @@ public final class ArticleRekeyer {
         if (tempKeySurvivorIds.isEmpty()) {
             return;
         }
-        // Unique constraint uq_article_source_guid_key cannot be deferred; temporary keys avoid transient collisions.
+        // uq_article_source_guid_key is not deferrable because it is the ON CONFLICT arbiter for inserts, so
+        // temporary keys avoid transient collisions.
         String sql = "UPDATE article SET guid_key = '~rekey~' || id WHERE id = ANY(?)";
         try (PreparedStatement ps = c.prepareStatement(sql)) {
             Array array = c.createArrayOf("bigint", tempKeySurvivorIds.toArray(Long[]::new));

@@ -3,10 +3,12 @@ package com.j11a.argus.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.j11a.argus.feed.Topic;
+import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.observability.MetricNames;
-import com.j11a.argus.testsupport.IngestMeters;
+import com.j11a.argus.testsupport.FeedStubServer;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
@@ -32,10 +34,6 @@ class DedupMetricsIT extends AbstractIntegrationTest {
 
     @Autowired
     private SpanCollectorConfig.CollectingSpanProcessor spans;
-
-    private IngestMeters meters() {
-        return new IngestMeters(registry);
-    }
 
     @Test
     void everyDecisionAndReasonIsCountedWithExactTags() {
@@ -69,13 +67,27 @@ class DedupMetricsIT extends AbstractIntegrationTest {
 
     @Test
     void allThreeLinkFallbackOutcomesExistAfterOneCreate() {
-        createFeedFrom("/dm/one.xml", "bbc-like-rss2.xml", Topic.WORLD);
-
-        for (String outcome : List.of("guid_replaced", "guarded_homepage", "guarded_shared")) {
-            assertThat(registry.find(MetricNames.INGEST_LINK_FALLBACK).tag("outcome", outcome).counters())
-                    .as(outcome).isNotEmpty()
-                    .allSatisfy(counter -> assertThat(counter.getId().getTag("source")).isNotBlank());
+        String source = "fallback-series.example.test";
+        stub.serve("/dm/fallback.xml", 200, "application/rss+xml", FeedStubServer.utf8(
+                "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>T</title><link>https://" + source
+                        + "/</link><description>d</description><item><title>One</title><link>https://" + source
+                        + "/one</link><guid>one</guid></item></channel></rss>"));
+        List<String> outcomes = List.of("guid_replaced", "guarded_homepage", "guarded_shared");
+        for (String outcome : outcomes) {
+            assertThat(fallbackSeries(source, outcome)).as("%s before create", outcome).isEmpty();
         }
+
+        feedService.create(new CreateFeedRequest(stub.baseUrl() + "/dm/fallback.xml", null, Topic.WORLD, null));
+
+        for (String outcome : outcomes) {
+            assertThat(fallbackSeries(source, outcome)).as("%s after create", outcome).hasSize(1);
+            assertThat(meters().fallback(source, outcome)).as(outcome).isZero();
+        }
+    }
+
+    private List<Counter> fallbackSeries(String source, String outcome) {
+        return registry.find(MetricNames.INGEST_LINK_FALLBACK).tag("source", source).tag("outcome", outcome)
+                .counters().stream().toList();
     }
 
     @Test

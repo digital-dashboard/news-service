@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 class SkipReasonTest {
 
     @Test
-    void tagsMatchContract() {
+    void metricTagsAreTheDocumentedReasonValues() {
         assertThat(SkipReason.MISSING_IDENTITY.tag()).isEqualTo("missing_identity");
         assertThat(SkipReason.BATCH_DUPLICATE.tag()).isEqualTo("batch_duplicate");
     }

@@ -105,7 +105,7 @@ public class FeedService {
                 : sources.findOrCreate(SourceResolver.keyFor(parsed.siteLink(), uri), parsed.siteLink());
         timer.completed(source.getKey(), loaded.bodyLength());
         long id = inserter.insert(new NewFeed(source.getId(), nameFor(request, parsed, source), url,
-                        StoredUrls.clean(parsed.siteLink()), request.topic(), languageOf(parsed)))
+                        StoredUrls.cleanPublic(parsed.siteLink()), request.topic(), languageOf(parsed)))
                 .orElseThrow(() -> conflict(inserter.findIdByUrl(url)));
         Feed feed = requireFeed(id);
         // The feed is committed, so a failed first ingest must not turn a successful create into an error.
@@ -154,6 +154,7 @@ public class FeedService {
                 .query(Long.class)
                 .optional()
                 .orElseThrow(() -> notFound(id));
+        // Serialises with ingest so a delete cannot race an article_feed insert for the same source.
         sourceLock.acquire(sourceId);
         jdbc.sql(DELETE_OWNED_ARTICLES).param("feedId", id).update();
         int deleted = jdbc.sql("DELETE FROM feed WHERE id = :id").param("id", id).update();

@@ -53,7 +53,8 @@ class ConflictAbsorptionIT extends AbstractIntegrationTest {
                     .execute(status -> applier.apply(sourceId, feed.id(), resolution, NOW, NOW));
 
             assertThat(logs.messagesAt(Level.WARN)).anySatisfy(message ->
-                    assertThat(message).contains("Insert conflict").contains(guidKey));
+                    assertThat(message).contains("Insert conflict").contains("existing article id " + articleId)
+                            .doesNotContain(guidKey));
         }
 
         assertThat(counts).isNotNull();
@@ -63,9 +64,5 @@ class ConflictAbsorptionIT extends AbstractIntegrationTest {
         assertThat(count("SELECT count(*) FROM article_feed WHERE article_id = " + articleId)).isEqualTo(1);
         assertThat(jdbcClient.sql("SELECT title FROM article WHERE id = :id").param("id", articleId)
                 .query(String.class).single()).isEqualTo(titleBefore);
-    }
-
-    private long count(String sql) {
-        return jdbcClient.sql(sql).query(Long.class).single();
     }
 }

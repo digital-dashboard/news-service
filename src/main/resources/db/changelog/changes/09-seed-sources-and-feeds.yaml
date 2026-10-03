@@ -3,6 +3,8 @@ databaseChangeLog:
       id: 09-seed-sources-and-feeds
       author: argus
       context: "!test"
+      comment: >-
+        Runs once, except under the test context. ON CONFLICT only fills defaults and never overwrites owner edits.
       changes:
         - sql:
             sql: |

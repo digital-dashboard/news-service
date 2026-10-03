@@ -22,6 +22,18 @@ class StoredUrlsTest {
         assertThat(StoredUrls.clean(link)).isEqualTo(link);
     }
 
+    @Test
+    void cleanPublicDropsUserInfoQueryAndFragmentButKeepsPortAndPath() {
+        assertThat(StoredUrls.cleanPublic(" HTTPS://User:Pw@Site.Example.test:8443/home?token=SECRET#top "))
+                .isEqualTo("https://site.example.test:8443/home");
+    }
+
+    @Test
+    void cleanPublicIsNullForNullAndNonHttpLinks() {
+        assertThat(StoredUrls.cleanPublic(null)).isNull();
+        assertThat(StoredUrls.cleanPublic("ftp://example.com/a")).isNull();
+    }
+
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = {"  ", "ftp://example.com/a", "file:///etc/passwd", "/relative/path", "mailto:a@b.c",

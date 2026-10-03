@@ -11,7 +11,8 @@ import liquibase.LabelExpression;
 import liquibase.Liquibase;
 import liquibase.database.jvm.JdbcConnection;
 import liquibase.exception.LiquibaseException;
-import liquibase.resource.ClassLoaderResourceAccessor;
+import liquibase.integration.spring.SpringResourceAccessor;
+import org.springframework.core.io.DefaultResourceLoader;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 public final class ScratchDatabase implements AutoCloseable {
@@ -62,14 +63,14 @@ public final class ScratchDatabase implements AutoCloseable {
 
     public void migrate(String contexts) throws LiquibaseException, SQLException {
         try (Connection c = connect();
-             Liquibase liquibase = new Liquibase(CHANGELOG, new ClassLoaderResourceAccessor(), new JdbcConnection(c))) {
+             Liquibase liquibase = new Liquibase(CHANGELOG, new SpringResourceAccessor(new DefaultResourceLoader()), new JdbcConnection(c))) {
             liquibase.update(new Contexts(contexts));
         }
     }
 
     public void migrateFirst(int changesets, String contexts) throws LiquibaseException, SQLException {
         try (Connection c = connect();
-             Liquibase liquibase = new Liquibase(CHANGELOG, new ClassLoaderResourceAccessor(), new JdbcConnection(c))) {
+             Liquibase liquibase = new Liquibase(CHANGELOG, new SpringResourceAccessor(new DefaultResourceLoader()), new JdbcConnection(c))) {
             liquibase.update(changesets, new Contexts(contexts), new LabelExpression());
         }
     }

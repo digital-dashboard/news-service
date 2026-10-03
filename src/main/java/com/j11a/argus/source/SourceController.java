@@ -1,6 +1,6 @@
 package com.j11a.argus.source;
 
-import com.j11a.argus.web.error.ApiException;
+import com.j11a.argus.web.PageParams;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -17,9 +17,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/sources")
 public class SourceController {
 
-    static final int MAX_PAGE_SIZE = 100;
-    private static final String PAGE_TOO_DEEP = "page is too large for this size";
-
     private final SourceQueryService queryService;
     private final SourceService sourceService;
 
@@ -31,10 +28,8 @@ public class SourceController {
     @GetMapping
     public PagedModel<SourceResponse> list(
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size) {
-        if ((long) page * size > Integer.MAX_VALUE) {
-            throw ApiException.validationFailed("page", PAGE_TOO_DEEP);
-        }
+            @RequestParam(defaultValue = "20") @Min(1) @Max(PageParams.MAX_PAGE_SIZE) int size) {
+        PageParams.requireReachable(page, size);
         return new PagedModel<>(queryService.list(page, size));
     }
 
@@ -45,15 +40,6 @@ public class SourceController {
 
     @PatchMapping("/{id}")
     public SourceResponse patch(@PathVariable long id, @Valid @RequestBody PatchSourceRequest request) {
-        if (request.isEmpty()) {
-            throw ApiException.validationFailed("request", "at least one field must be provided");
-        }
-        if (request.name() != null && request.name().strip().isEmpty()) {
-            throw ApiException.validationFailed("name", "must not be blank");
-        }
-        if (request.country() != null) {
-            CountryCodes.normalise(request.country());
-        }
         return sourceService.patch(id, request);
     }
 }

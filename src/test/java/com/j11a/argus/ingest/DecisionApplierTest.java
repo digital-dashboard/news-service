@@ -93,7 +93,7 @@ class DecisionApplierTest {
     @Test
     void updateContentChangedRewritesContentAndReplacesGuidIfFlagged() {
         KeyedEntry entry = keyedEntry("g2-new", "link-2", "New Title");
-        EntryDecision.Update decision = new EntryDecision.Update(entry, 201L, UpdateReason.CONTENT_CHANGED, true, true);
+        EntryDecision.Update decision = new EntryDecision.Update(entry, 201L, UpdateReason.CONTENT_CHANGED, true);
 
         Resolution r = new Resolution(List.of(decision), Map.of());
         PersistCounts counts = applier.apply(1L, 2L, r, NOW, NOW);
@@ -110,7 +110,7 @@ class DecisionApplierTest {
     @Test
     void updateTimestampOnlyAdvancesTimestamps() {
         KeyedEntry entry = keyedEntry("g3", "link-3", "Same Title");
-        EntryDecision.Update decision = new EntryDecision.Update(entry, 301L, UpdateReason.TIMESTAMP_ONLY, false, true);
+        EntryDecision.Update decision = new EntryDecision.Update(entry, 301L, UpdateReason.TIMESTAMP_ONLY, false);
 
         Resolution r = new Resolution(List.of(decision), Map.of());
         PersistCounts counts = applier.apply(1L, 2L, r, NOW, NOW);

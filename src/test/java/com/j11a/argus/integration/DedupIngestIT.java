@@ -7,12 +7,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.testsupport.AdminKeys;
-import com.j11a.argus.testsupport.IngestMeters;
-import io.micrometer.core.instrument.MeterRegistry;
 import java.time.OffsetDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -23,21 +20,10 @@ class DedupIngestIT extends AbstractIntegrationTest {
 
     private final JsonMapper mapper = JsonMapper.builder().build();
 
-    @Autowired
-    private MeterRegistry registry;
-
-    private IngestMeters meters() {
-        return new IngestMeters(registry);
-    }
-
     private JsonNode refresh(long feedId) throws Exception {
         String body = mockMvc.perform(post(FEEDS + "/" + feedId + "/refresh").header(AdminKeys.HEADER, AdminKeys.VALID))
                 .andReturn().getResponse().getContentAsString();
         return mapper.readTree(body);
-    }
-
-    private long count(String sql) {
-        return jdbcClient.sql(sql).query(Long.class).single();
     }
 
     private List<OffsetDateTime> modifiedAts() {

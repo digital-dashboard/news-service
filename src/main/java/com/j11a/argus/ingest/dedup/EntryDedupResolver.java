@@ -19,23 +19,10 @@ import org.jspecify.annotations.Nullable;
 
 public final class EntryDedupResolver {
 
-    private static final Comparator<KeyedEntry> SURVIVOR_COMPARATOR = (a, b) -> {
-        Instant aTime = a.entry().updatedAt();
-        Instant bTime = b.entry().updatedAt();
-        if (aTime == null && bTime != null) {
-            return -1;
-        }
-        if (aTime != null && bTime == null) {
-            return 1;
-        }
-        if (aTime != null && bTime != null) {
-            int cmp = aTime.compareTo(bTime);
-            if (cmp != 0) {
-                return cmp;
-            }
-        }
-        return Integer.compare(a.position(), b.position());
-    };
+    // Latest upstream update wins (undated loses to dated); the later position breaks ties.
+    private static final Comparator<KeyedEntry> SURVIVOR_COMPARATOR = Comparator
+            .comparing((KeyedEntry e) -> e.entry().updatedAt(), Comparator.nullsFirst(Comparator.naturalOrder()))
+            .thenComparingInt(KeyedEntry::position);
 
     public Resolution resolve(DedupInput input) {
         List<ParsedEntry> rawEntries = input.entries();
@@ -43,7 +30,7 @@ public final class EntryDedupResolver {
 
         List<KeyedEntry> keyedEntries = keyEntries(rawEntries, input.fetchedAt(), decisions);
         List<KeyedEntry> survivors = collapseBatch(keyedEntries, decisions);
-        Map<String, GuardType> guardedLinks = findGuardedLinks(survivors, input.homepageKey());
+        Map<String, LinkFallback> guardedLinks = findGuardedLinks(survivors, input.homepageKey());
 
         Set<String> allSurvivorGuidKeys = new HashSet<>();
         Set<String> usableLinkKeys = new HashSet<>();
@@ -102,20 +89,20 @@ public final class EntryDedupResolver {
         return survivors;
     }
 
-    private Map<String, GuardType> findGuardedLinks(List<KeyedEntry> survivors, @Nullable String homepageKey) {
+    private Map<String, LinkFallback> findGuardedLinks(List<KeyedEntry> survivors, @Nullable String homepageKey) {
         Map<String, Set<String>> guidsByLink = new HashMap<>();
         for (KeyedEntry s : survivors) {
             if (s.linkKey() != null) {
                 guidsByLink.computeIfAbsent(s.linkKey(), key -> new HashSet<>()).add(s.guidKey());
             }
         }
-        Map<String, GuardType> guarded = new HashMap<>();
+        Map<String, LinkFallback> guarded = new HashMap<>();
         for (Map.Entry<String, Set<String>> entry : guidsByLink.entrySet()) {
             String linkKey = entry.getKey();
             if (linkKey.equals(homepageKey) || LinkCleaner.isRoot(linkKey)) {
-                guarded.put(linkKey, GuardType.HOMEPAGE);
+                guarded.put(linkKey, LinkFallback.GUARDED_HOMEPAGE);
             } else if (entry.getValue().size() >= 2) {
-                guarded.put(linkKey, GuardType.SHARED);
+                guarded.put(linkKey, LinkFallback.GUARDED_SHARED);
             }
         }
         return guarded;
@@ -123,7 +110,7 @@ public final class EntryDedupResolver {
 
     private void collectKeys(
             List<KeyedEntry> survivors,
-            Map<String, GuardType> guardedLinks,
+            Map<String, LinkFallback> guardedLinks,
             Set<String> allSurvivorGuidKeys,
             Set<String> usableLinkKeys) {
         for (KeyedEntry survivor : survivors) {
@@ -170,7 +157,7 @@ public final class EntryDedupResolver {
 
     private Map<KeyedEntry, ExistingArticle> matchByLink(
             List<KeyedEntry> survivors,
-            Map<String, GuardType> guardedLinks,
+            Map<String, LinkFallback> guardedLinks,
             Map<String, List<ExistingArticle>> existingByLink,
             Map<KeyedEntry, ExistingArticle> matchedByGuid,
             Set<Long> claimed,
@@ -181,9 +168,9 @@ public final class EntryDedupResolver {
                 continue;
             }
             String linkKey = survivor.linkKey();
-            GuardType guard = guardedLinks.get(linkKey);
+            LinkFallback guard = guardedLinks.get(linkKey);
             if (guard != null) {
-                fallbackCounts.merge(guard.fallback(), 1, Integer::sum);
+                fallbackCounts.merge(guard, 1, Integer::sum);
             } else {
                 List<ExistingArticle> candidates = existingByLink.getOrDefault(linkKey, List.of());
                 if (candidates.size() == 1 && !claimed.contains(candidates.getFirst().id())) {
@@ -191,7 +178,7 @@ public final class EntryDedupResolver {
                     matches.put(survivor, match);
                     claimed.add(match.id());
                     fallbackCounts.merge(LinkFallback.GUID_REPLACED, 1, Integer::sum);
-                } else if (candidates.size() >= 2 || (candidates.size() == 1 && claimed.contains(candidates.getFirst().id()))) {
+                } else if (!candidates.isEmpty()) {
                     fallbackCounts.merge(LinkFallback.GUARDED_SHARED, 1, Integer::sum);
                 }
             }
@@ -216,7 +203,7 @@ public final class EntryDedupResolver {
         boolean timeAdvanced = upstreamTimeAdvanced(survivor.entry(), existing);
         if (!existing.linkedToFeed()) {
             if (timeAdvanced) {
-                return new EntryDecision.Update(survivor, existing.id(), UpdateReason.TIMESTAMP_ONLY, guidReplaced, false);
+                return new EntryDecision.Update(survivor, existing.id(), UpdateReason.TIMESTAMP_ONLY, guidReplaced);
             }
             return new EntryDecision.Link(survivor, existing.id(), guidReplaced);
         }
@@ -225,10 +212,10 @@ public final class EntryDedupResolver {
             return new EntryDecision.Unchanged(survivor, existing.id(), guidReplaced, true);
         }
         if (!existing.feedContentHash().equals(survivor.contentHash())) {
-            return new EntryDecision.Update(survivor, existing.id(), UpdateReason.CONTENT_CHANGED, guidReplaced, true);
+            return new EntryDecision.Update(survivor, existing.id(), UpdateReason.CONTENT_CHANGED, guidReplaced);
         }
         if (timeAdvanced) {
-            return new EntryDecision.Update(survivor, existing.id(), UpdateReason.TIMESTAMP_ONLY, guidReplaced, true);
+            return new EntryDecision.Update(survivor, existing.id(), UpdateReason.TIMESTAMP_ONLY, guidReplaced);
         }
         return new EntryDecision.Unchanged(survivor, existing.id(), guidReplaced, false);
     }
@@ -251,20 +238,5 @@ public final class EntryDedupResolver {
         counts.put(LinkFallback.GUARDED_HOMEPAGE, 0);
         counts.put(LinkFallback.GUARDED_SHARED, 0);
         return counts;
-    }
-
-    private enum GuardType {
-        HOMEPAGE(LinkFallback.GUARDED_HOMEPAGE),
-        SHARED(LinkFallback.GUARDED_SHARED);
-
-        private final LinkFallback fallback;
-
-        GuardType(LinkFallback fallback) {
-            this.fallback = fallback;
-        }
-
-        LinkFallback fallback() {
-            return fallback;
-        }
     }
 }

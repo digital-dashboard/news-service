@@ -1,16 +1,17 @@
-package com.j11a.argus.migration;
+package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.j11a.argus.feed.parse.ParsedEntry;
 import com.j11a.argus.ingest.ContentHash;
+import com.j11a.argus.ingest.ExistingArticleLoader;
 import com.j11a.argus.ingest.dedup.DedupInput;
 import com.j11a.argus.ingest.dedup.EntryDecision;
 import com.j11a.argus.ingest.dedup.EntryDedupResolver;
-import com.j11a.argus.ingest.dedup.ExistingArticle;
 import com.j11a.argus.ingest.dedup.ExistingArticleLookup;
 import com.j11a.argus.ingest.dedup.Resolution;
-import com.j11a.argus.integration.AbstractIntegrationTest;
+import com.j11a.argus.migration.ArticleRekeyer;
+import com.j11a.argus.migration.RekeyReport;
 import com.j11a.argus.testsupport.ScratchDatabase;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -24,6 +25,8 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 class RekeyMigrationIT extends AbstractIntegrationTest {
@@ -37,22 +40,18 @@ class RekeyMigrationIT extends AbstractIntegrationTest {
     @Test
     void migrationRekeyCollapsesDuplicatesBackfillsHashesAndIsIdempotent() throws Exception {
         try (ScratchDatabase db = ScratchDatabase.create(postgres)) {
-            // 1. migrateFirst(7, "test") applies 01–07
             db.migrateFirst(7, "test");
 
             Instant t1 = Instant.parse("2026-10-01T10:00:00Z");
             Instant t2 = Instant.parse("2026-10-01T12:00:00Z");
             Instant tEarly = Instant.parse("2026-10-01T08:00:00Z");
 
-            // 2. Insert phase-2-shaped rows with interim keys
             try (Connection conn = db.connect()) {
                 insertPhase2Articles(conn, t1, t2, tEarly);
             }
 
-            // 3. migrate("test") applies the rest (including 08-rekey-articles)
             db.migrate("test");
 
-            // 4. Assert migration outcomes, idempotence and no duplicates on first poll
             try (Connection conn = db.connect()) {
                 assertMigratedArticles(conn, t1, tEarly);
                 assertIdempotence(conn);
@@ -226,7 +225,8 @@ class RekeyMigrationIT extends AbstractIntegrationTest {
     }
 
     private void assertFirstPollNoDuplicates(Connection conn, Instant t1) {
-        ExistingArticleLookup lookup = createLookup(conn, 1L, 1L);
+        ExistingArticleLookup lookup = new ExistingArticleLoader(JdbcClient.create(
+                new SingleConnectionDataSource(conn, true))).forFeed(1L, 1L);
         ParsedEntry entryA = new ParsedEntry("https://www.news.example.test/a/1#0",
                 "https://www.news.example.test/a/1?at_medium=rss", "Article A", "Excerpt A", null, null, List.of("world"), t1, t1);
         ParsedEntry entryC = new ParsedEntry("urn:uuid:123", "https://news.example.test/c",
@@ -280,40 +280,5 @@ class RekeyMigrationIT extends AbstractIntegrationTest {
             }
         }
         return list;
-    }
-
-    private ExistingArticleLookup createLookup(Connection conn, long sourceId, long feedId) {
-        return (guidKeys, linkKeys) -> {
-            String sql = """
-                    SELECT a.id, a.guid_key, a.link_key, a.updated_at_upstream,
-                           af.article_id IS NOT NULL AS linked, af.content_hash AS feed_content_hash
-                    FROM article a
-                    LEFT JOIN article_feed af ON af.article_id = a.id AND af.feed_id = ?
-                    WHERE a.source_id = ?
-                      AND (a.guid_key = ANY(CAST(? AS text[])) OR a.link_key = ANY(CAST(? AS text[])))
-                    """;
-            List<ExistingArticle> articles = new ArrayList<>();
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setLong(1, feedId);
-                ps.setLong(2, sourceId);
-                ps.setArray(3, conn.createArrayOf("text", guidKeys.toArray(String[]::new)));
-                ps.setArray(4, conn.createArrayOf("text", linkKeys.toArray(String[]::new)));
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        long id = rs.getLong("id");
-                        String guidKey = rs.getString("guid_key");
-                        String linkKey = rs.getString("link_key");
-                        Timestamp ts = rs.getTimestamp("updated_at_upstream");
-                        Instant updatedAtUpstream = ts != null ? ts.toInstant() : null;
-                        boolean linked = rs.getBoolean("linked");
-                        String feedContentHash = rs.getString("feed_content_hash");
-                        articles.add(new ExistingArticle(id, guidKey, linkKey, updatedAtUpstream, linked, feedContentHash));
-                    }
-                }
-            } catch (SQLException e) {
-                throw new RuntimeException(e);
-            }
-            return articles;
-        };
     }
 }

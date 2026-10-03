@@ -114,7 +114,7 @@ class SourceApiIT extends AbstractIntegrationTest {
                 stub.baseUrl() + "/initial.xml", null, Topic.WORLD, null));
         long sourceId = initial.source().id();
 
-        // Feed fixture has link pointing to different-site.test
+        // The channel link points at a different site than the source the feed is attached to.
         String otherSiteXml = rss("https://different-site.test/home", item("diff-1"));
         stub.serve("/explicit-source.xml", 200, "application/rss+xml", otherSiteXml.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
@@ -135,6 +135,52 @@ class SourceApiIT extends AbstractIntegrationTest {
         mockMvc.perform(get(SOURCES + "/" + sourceId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.feeds.length()").value(2));
+    }
+
+    @Test
+    void invalidPatchesAreRejectedWith400() throws Exception {
+        FeedResponse feed = createFeedFrom("/patch-400.xml", "bbc-like-rss2.xml", Topic.WORLD);
+        String path = SOURCES + "/" + feed.source().id();
+
+        adminPatch(path, "{}").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("request"));
+        adminPatch(path, "{\"name\":\"   \"}").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("name"));
+        adminPatch(path, "{\"country\":\"UK\"}").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("country"));
+    }
+
+    @Test
+    void siteLinkCredentialsAndQueryAreNeverStoredOrServed() throws Exception {
+        String xml = rss("https://user:pw@site.example.test/home?token=SECRET", item("redact-1"));
+        stub.serve("/redact.xml", 200, "application/rss+xml", xml.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        FeedResponse feed = feedService.create(new CreateFeedRequest(
+                stub.baseUrl() + "/redact.xml", null, Topic.WORLD, null));
+
+        String sourceJson = mockMvc.perform(get(SOURCES + "/" + feed.source().id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.homepage").value("https://site.example.test/home"))
+                .andReturn().getResponse().getContentAsString();
+        String feedJson = mockMvc.perform(get(FEEDS + "/" + feed.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.siteUrl").value("https://site.example.test/home"))
+                .andReturn().getResponse().getContentAsString();
+        String storedSite = jdbcClient.sql("SELECT site_url FROM feed WHERE id = :id").param("id", feed.id())
+                .query(String.class).single();
+        String storedHomepage = jdbcClient.sql("SELECT homepage_url FROM source WHERE id = :id")
+                .param("id", feed.source().id()).query(String.class).single();
+        assertThat(sourceJson + feedJson + storedSite + storedHomepage)
+                .doesNotContain("token", "SECRET", "user:pw");
+    }
+
+    @Test
+    void patchHomepageQueryIsDropped() throws Exception {
+        FeedResponse feed = createFeedFrom("/patch-query.xml", "bbc-like-rss2.xml", Topic.WORLD);
+
+        adminPatch(SOURCES + "/" + feed.source().id(), "{\"homepage\":\"https://h.example.test/p?token=SECRET\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.homepage").value("https://h.example.test/p"));
     }
 
     @Test

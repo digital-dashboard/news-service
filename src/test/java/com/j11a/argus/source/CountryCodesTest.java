@@ -15,24 +15,24 @@ import org.junit.jupiter.params.provider.ValueSource;
 class CountryCodesTest {
 
     @Test
-    void gbGivesGb() {
+    void lowercaseCodeIsUppercased() {
         assertThat(CountryCodes.normalise("gb")).isEqualTo("GB");
     }
 
     @Test
-    void zmIsAccepted() {
+    void zambiaIsAcceptedInEitherCase() {
         assertThat(CountryCodes.normalise("ZM")).isEqualTo("ZM");
         assertThat(CountryCodes.normalise("zm")).isEqualTo("ZM");
     }
 
     @Test
-    void ukIsRejected() {
+    void ukIsRejectedBecauseIsoUsesGb() {
         assertValidationFailed("UK");
     }
 
     @ParameterizedTest
     @NullAndEmptySource
-    @ValueSource(strings = {"   ", "USA", "12", "XX"})
+    @ValueSource(strings = {"   ", "USA", "12", "XX", "\u00DF", "\u0131d", "G\u00DF", "g b", "\uFF27\uFF22"})
     void invalidCountryCodesAreRejected(String invalid) {
         assertValidationFailed(invalid);
     }

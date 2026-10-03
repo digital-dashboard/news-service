@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -30,6 +31,7 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 class ArticlePersisterTest {
@@ -100,8 +102,26 @@ class ArticlePersisterTest {
         assertThat(input.fetchedAt()).isEqualTo(FETCHED_AT);
         assertThat(input.lookup()).isSameAs(lookup);
 
-        verify(telemetry).span(eq("argus.resolve"), eq(Map.of("source.id", "2")), any());
+        verify(telemetry).span(eq(IngestTelemetry.RESOLVE_SPAN),
+                eq(Map.of(IngestTelemetry.SOURCE_ID_ATTRIBUTE, "2")), any());
         verify(applier).apply(2L, 1L, resolution, FETCHED_AT, NOW);
+    }
+
+    @Test
+    void persistTakesTheLockBeforeReadingTheHomepageThenResolvesThenApplies() {
+        stubHomepage("https://example.test/home");
+        Resolution resolution = new Resolution(List.of(), Map.of());
+        when(resolver.resolve(any())).thenReturn(resolution);
+        when(applier.apply(anyLong(), anyLong(), any(), any(), any()))
+                .thenReturn(new PersistCounts(0, Map.of(), 0, 0, Map.of(), Map.of()));
+
+        persister.persist(feed, List.of(), FETCHED_AT);
+
+        InOrder inOrder = inOrder(sourceLock, jdbc, resolver, applier);
+        inOrder.verify(sourceLock).acquire(2L);
+        inOrder.verify(jdbc).sql(anyString());
+        inOrder.verify(resolver).resolve(any());
+        inOrder.verify(applier).apply(2L, 1L, resolution, FETCHED_AT, NOW);
     }
 
     @Test

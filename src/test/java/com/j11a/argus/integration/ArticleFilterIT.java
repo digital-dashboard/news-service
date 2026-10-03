@@ -1,4 +1,4 @@
-package com.j11a.argus.article;
+package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -6,7 +6,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.j11a.argus.feed.Topic;
-import com.j11a.argus.integration.AbstractIntegrationTest;
 import jakarta.persistence.EntityManagerFactory;
 import java.time.Instant;
 import java.time.OffsetDateTime;

@@ -47,6 +47,24 @@ class SourceServiceTest {
     }
 
     @Test
+    void findOrCreateStoresOnlyTheRedactedSiteLink() {
+        when(sources.findByKey("example.test")).thenReturn(Optional.of(mock(Source.class)));
+
+        service.findOrCreate("example.test", "https://u:p@Example.test/home?token=SECRET#x");
+
+        verify(spec).param("homepage", "https://example.test/home");
+    }
+
+    @Test
+    void patchRedactsTheHomepageQuery() {
+        when(spec.update()).thenReturn(1);
+
+        service.patch(10L, new PatchSourceRequest(null, "https://h.example.test/p?token=SECRET", null));
+
+        verify(spec).param("homepage", "https://h.example.test/p");
+    }
+
+    @Test
     void findByIdDelegatesToRepository() {
         Source source = mock(Source.class);
         when(sources.findById(10L)).thenReturn(Optional.of(source));
@@ -86,29 +104,32 @@ class SourceServiceTest {
     }
 
     @Test
-    void patchAllNullGives400() {
+    void patchWithNoFieldsGives400() {
         PatchSourceRequest request = new PatchSourceRequest(null, null, null);
         assertThatThrownBy(() -> service.patch(10L, request))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
                     assertThat(e.code()).isEqualTo(ErrorCode.VALIDATION_FAILED);
+                    assertThat(e.properties().get("errors").toString()).contains("request");
                 });
     }
 
     @Test
-    void patchBlankNameGives400() {
+    void patchBlankNameGives400OnTheNameField() {
         PatchSourceRequest request = new PatchSourceRequest("   ", null, null);
         assertThatThrownBy(() -> service.patch(10L, request))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
                     assertThat(e.code()).isEqualTo(ErrorCode.VALIDATION_FAILED);
+                    assertThat(e.properties().get("errors").toString()).contains("name");
                 });
     }
 
     @Test
-    void patchInvalidCountryGives400() {
+    void patchInvalidCountryGives400OnTheCountryField() {
         PatchSourceRequest request = new PatchSourceRequest(null, null, "UK");
         assertThatThrownBy(() -> service.patch(10L, request))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
                     assertThat(e.code()).isEqualTo(ErrorCode.VALIDATION_FAILED);
+                    assertThat(e.properties().get("errors").toString()).contains("country");
                 });
     }
 

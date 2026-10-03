@@ -15,7 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class SourceService {
 
-    // The name starts as the key until a source rename exists.
+    // A new source is named after its key until it is renamed via PATCH or named by the seed.
     private static final String INSERT = """
             INSERT INTO source (key, name, homepage_url, created_at, updated_at)
             VALUES (:key, :key, :homepage, :now, :now)
@@ -48,7 +48,7 @@ public class SourceService {
     public Source findOrCreate(String key, @Nullable String siteLink) {
         jdbc.sql(INSERT)
                 .param("key", key)
-                .param("homepage", StoredUrls.clean(siteLink))
+                .param("homepage", StoredUrls.cleanPublic(siteLink))
                 .param("now", OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))
                 .update();
         return sources.findByKey(key).orElseThrow();
@@ -67,7 +67,7 @@ public class SourceService {
         if (request.name() != null && name.isEmpty()) {
             throw ApiException.validationFailed("name", "must not be blank");
         }
-        String homepage = request.homepage() != null ? StoredUrls.clean(request.homepage()) : null;
+        String homepage = request.homepage() != null ? StoredUrls.cleanPublic(request.homepage()) : null;
         String country = request.country() != null ? CountryCodes.normalise(request.country()) : null;
 
         int updated = jdbc.sql(UPDATE)

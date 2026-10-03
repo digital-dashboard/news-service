@@ -45,6 +45,7 @@ public class ArticlePersister {
 
         telemetry.lockWait(sourceKey, sourceId, () -> sourceLock.acquire(sourceId));
 
+        // Re-read under the lock: a PATCH may have changed the homepage since the feed was loaded.
         String homepageUrl = jdbc.sql("SELECT homepage_url FROM source WHERE id = :id")
                 .param("id", sourceId)
                 .query(String.class)
@@ -52,9 +53,10 @@ public class ArticlePersister {
                 .orElse(null);
         String homepageKey = EntryKeys.linkKey(homepageUrl);
 
-        Resolution resolution = telemetry.span("argus.resolve",
-                Map.of("source.id", String.valueOf(sourceId)),
-                () -> resolver.resolve(new DedupInput(feedId, entries, homepageKey, fetchedAt, loader.forFeed(sourceId, feedId))));
+        DedupInput input = new DedupInput(feedId, entries, homepageKey, fetchedAt, loader.forFeed(sourceId, feedId));
+        Resolution resolution = telemetry.span(IngestTelemetry.RESOLVE_SPAN,
+                Map.of(IngestTelemetry.SOURCE_ID_ATTRIBUTE, String.valueOf(sourceId)),
+                () -> resolver.resolve(input));
 
         return applier.apply(sourceId, feedId, resolution, fetchedAt, clock.instant());
     }

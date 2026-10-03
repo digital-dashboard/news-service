@@ -1,8 +1,8 @@
-package com.j11a.argus.testsupport;
+package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.j11a.argus.integration.AbstractIntegrationTest;
+import com.j11a.argus.testsupport.ScratchDatabase;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;

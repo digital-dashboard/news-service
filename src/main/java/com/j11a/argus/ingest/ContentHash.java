@@ -9,9 +9,12 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 public final class ContentHash {
+
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+", Pattern.UNICODE_CHARACTER_CLASS);
 
     private ContentHash() {
     }
@@ -40,7 +43,7 @@ public final class ContentHash {
         }
         String nfkc = Normalizer.normalize(text, Normalizer.Form.NFKC);
         String noNbsp = nfkc.replace('\u00A0', ' ');
-        String collapsed = noNbsp.replaceAll("\\s+", " ");
+        String collapsed = WHITESPACE.matcher(noNbsp).replaceAll(" ");
         return collapsed.strip();
     }
 }

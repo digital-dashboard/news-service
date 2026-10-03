@@ -6,7 +6,7 @@ import com.j11a.argus.feed.poll.PollTrigger;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.IngestReport;
 import com.j11a.argus.web.ApiPaths;
-import com.j11a.argus.web.error.ApiException;
+import com.j11a.argus.web.PageParams;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -29,9 +29,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/feeds")
 public class FeedController {
 
-    static final int MAX_PAGE_SIZE = 100;
-    private static final String PAGE_TOO_DEEP = "page is too large for this size";
-
     private final FeedService feeds;
     private final FeedIngestService ingest;
     private final FeedPoller poller;
@@ -51,10 +48,8 @@ public class FeedController {
     @GetMapping
     public PagedModel<FeedResponse> list(
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size) {
-        if ((long) page * size > Integer.MAX_VALUE) {
-            throw ApiException.validationFailed("page", PAGE_TOO_DEEP);
-        }
+            @RequestParam(defaultValue = "20") @Min(1) @Max(PageParams.MAX_PAGE_SIZE) int size) {
+        PageParams.requireReachable(page, size);
         return new PagedModel<>(feeds.list(page, size));
     }
 

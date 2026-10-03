@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class SourceLock {
 
+    // Two-int advisory lock key space: namespace 4100, then the source id.
     static final int SOURCE_LOCK_NAMESPACE = 4100;
 
     private final JdbcClient jdbc;
@@ -17,6 +18,10 @@ public class SourceLock {
         this.jdbc = jdbc;
     }
 
+    /**
+     * Try-lock first so an uncontended acquire reports zero and only a blocking wait is timed. The xact lock is
+     * released at commit or rollback, which is PgBouncer-safe (no session state).
+     */
     @Transactional(propagation = Propagation.MANDATORY)
     public Duration acquire(long sourceId) {
         int id = Math.toIntExact(sourceId);

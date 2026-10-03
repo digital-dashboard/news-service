@@ -1,11 +1,13 @@
-package com.j11a.argus.article;
+package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.j11a.argus.article.ArticleEdit;
+import com.j11a.argus.article.ArticleWriter;
+import com.j11a.argus.article.NewArticle;
 import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
-import com.j11a.argus.integration.AbstractIntegrationTest;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -145,7 +147,6 @@ class ArticleWriterIT extends AbstractIntegrationTest {
         NewArticle initial = sampleArticle("art-3", T1.toInstant(), T2.toInstant(), T0.toInstant());
         ArticleWriter.WriteResult result = writer.insert(initial, T0);
 
-        // rewriteContent with older effectiveAt (T1 < T2), dated = true -> should keep T2
         ArticleEdit editOlder = new ArticleEdit(
                 result.id(),
                 initial.linkKey(),
@@ -167,7 +168,6 @@ class ArticleWriterIT extends AbstractIntegrationTest {
                 .query(OffsetDateTime.class).single();
         assertThat(effective1).isEqualTo(T2);
 
-        // rewriteContent with newer effectiveAt (T3 > T2), but dated = false -> should still keep T2
         ArticleEdit editUndated = new ArticleEdit(
                 result.id(),
                 initial.linkKey(),
@@ -189,14 +189,12 @@ class ArticleWriterIT extends AbstractIntegrationTest {
                 .query(OffsetDateTime.class).single();
         assertThat(effective2).isEqualTo(T2);
 
-        // advanceTimestamps with dated = false -> keeps T2
         writer.advanceTimestamps(result.id(), null, T3.toInstant(), false, T2);
         OffsetDateTime effective3 = jdbcClient.sql("SELECT effective_at FROM article WHERE id = :id")
                 .param("id", result.id())
                 .query(OffsetDateTime.class).single();
         assertThat(effective3).isEqualTo(T2);
 
-        // advanceTimestamps with dated = true -> advances to T3
         writer.advanceTimestamps(result.id(), T3.toInstant(), T3.toInstant(), true, T3);
         OffsetDateTime effective4 = jdbcClient.sql("SELECT effective_at FROM article WHERE id = :id")
                 .param("id", result.id())
@@ -258,7 +256,6 @@ class ArticleWriterIT extends AbstractIntegrationTest {
         assertThat(firstSeenAt(result.id())).isEqualTo(T0);
         assertThat(linkRow2.get("content_hash")).isEqualTo("hash-a");
 
-        // Different hash: content_hash updated, first_seen_at unchanged
         writer.link(result.id(), feedId, "hash-b", T2);
         Map<String, Object> linkRow3 = jdbcClient.sql("SELECT first_seen_at, content_hash FROM article_feed WHERE article_id = :aid AND feed_id = :fid")
                 .param("aid", result.id())

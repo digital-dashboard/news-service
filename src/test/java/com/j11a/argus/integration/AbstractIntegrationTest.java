@@ -5,7 +5,9 @@ import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.feed.api.FeedService;
 import com.j11a.argus.testsupport.FeedStubServer;
+import com.j11a.argus.testsupport.IngestMeters;
 import com.j11a.argus.testsupport.ProbeController;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
@@ -42,9 +44,20 @@ public abstract class AbstractIntegrationTest {
     @Autowired
     protected FeedService feedService;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
+
     @BeforeEach
     void cleanTables() {
         jdbcClient.sql(CLEAN_TABLES).update();
+    }
+
+    protected IngestMeters meters() {
+        return new IngestMeters(meterRegistry);
+    }
+
+    protected long count(String sql) {
+        return jdbcClient.sql(sql).query(Long.class).single();
     }
 
     /** Serves the fixture at path on the stub host and registers a feed for it, which also ingests it. */

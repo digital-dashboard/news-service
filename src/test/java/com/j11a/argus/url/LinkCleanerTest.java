@@ -159,7 +159,7 @@ class LinkCleanerTest {
     }
 
     @Test
-    void nullInputGivesNull() {
+    void nullLinkCleansToNull() {
         assertThat(LinkCleaner.clean(null)).isNull();
     }
 
@@ -249,7 +249,6 @@ class LinkCleanerTest {
             assertThat(LinkCleaner.clean(cleaned)).isEqualTo(cleaned);
         }
 
-        // Seeded random generation of ~1000 URLs
         Random random = new Random(42);
         String[] schemes = {"http://", "https://", "HTTP://", "HTTPS://"};
         String[] userInfos = {"", "user@", "user:pass@"};

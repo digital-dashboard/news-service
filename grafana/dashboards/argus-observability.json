@@ -1,7 +1,7 @@
 {
   "uid": "argus-observability",
   "title": "Argus \u2014 Observability",
-  "description": "Argus service health: HTTP RED metrics, scheduled polling, per-feed health, the ingestion pipeline, data quality, JVM, PostgreSQL and HikariCP, container resources, Tempo traces and Loki logs. Version-controlled in grafana/dashboards and validated by the Argus dashboard tests.",
+  "description": "Argus service health: HTTP RED metrics, scheduled polling, per-feed health, the ingestion pipeline, deduplication, data quality, JVM, PostgreSQL and HikariCP, container resources, Tempo traces and Loki logs. Version-controlled in grafana/dashboards and validated by the Argus dashboard tests.",
   "tags": [
     "argus",
     "artemis",
@@ -77,7 +77,7 @@
       {
         "name": "source",
         "label": "Source",
-        "description": "Filters the ingestion, fetch retry and 304 ratio panels by feed source.",
+        "description": "Filters the ingestion, deduplication, data-quality, fetch-retry and 304-ratio panels by feed source.",
         "type": "query",
         "datasource": {
           "type": "prometheus",
@@ -1753,7 +1753,7 @@
       "id": 57,
       "type": "timeseries",
       "title": "Updates by reason",
-      "description": "Rate of updated entries per second by update reason (content_changed, timestamp_only, insert_conflict).",
+      "description": "Rate of updated entries per second by update reason: content_changed, timestamp_only (also used when an entry matched an article first seen through another feed of the source and its upstream update time is newer) or insert_conflict (the article already existed under that GUID, this feed was linked to it and its content left untouched).",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1867,7 +1867,7 @@
       "id": 59,
       "type": "timeseries",
       "title": "Cross-feed overlap",
-      "description": "Share of cross-feed duplicate links relative to new content (inserted or linked).",
+      "description": "Share of cross-feed duplicate links relative to new content (inserted or linked). A linked entry matched an existing article first seen through another feed of the source, unless its upstream update time is newer (then it counts as updated{timestamp_only}).",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
