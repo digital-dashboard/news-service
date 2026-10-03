@@ -137,8 +137,9 @@ class ArticleWriterIT extends AbstractIntegrationTest {
                 .param("id", result.id())
                 .query().singleRow();
 
-        assertThat(row).containsEntry("author", "Alice");
-        assertThat(row).containsEntry("image_url", "https://img.test/pic.jpg");
+        assertThat(row)
+                .containsEntry("author", "Alice")
+                .containsEntry("image_url", "https://img.test/pic.jpg");
     }
 
     @Test
