@@ -1,5 +1,6 @@
 package com.j11a.argus.feed.api;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -37,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -90,6 +92,37 @@ class FeedControllerTest {
                 .andExpect(jsonPath("$.enabled").value(true))
                 .andExpect(jsonPath("$.source.name").value("example.test"))
                 .andExpect(jsonPath("$.createdAt").value("2026-10-02T10:00:00Z"));
+    }
+
+    @Test
+    void createWithSourceIdPassesSourceIdToService() throws Exception {
+        when(feeds.create(any())).thenReturn(feed(42));
+
+        mockMvc.perform(adminPost(FEEDS, "{\"url\":\"https://example.test/rss.xml\",\"topic\":\"TECH\",\"sourceId\":7}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(42));
+
+        ArgumentCaptor<CreateFeedRequest> captor = ArgumentCaptor.forClass(CreateFeedRequest.class);
+        verify(feeds).create(captor.capture());
+        assertThat(captor.getValue().sourceId()).isEqualTo(7L);
+    }
+
+    @Test
+    void nonPositiveSourceIdIsRejected() throws Exception {
+        mockMvc.perform(adminPost(FEEDS, "{\"url\":\"https://example.test/rss.xml\",\"topic\":\"TECH\",\"sourceId\":0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[?(@.field=='sourceId')]").isNotEmpty());
+        verifyNoInteractions(feeds);
+    }
+
+    @Test
+    void createWithUnknownSourceIdIs404() throws Exception {
+        when(feeds.create(any())).thenThrow(new ApiException(ErrorCode.SOURCE_NOT_FOUND, "Source 99 does not exist."));
+
+        mockMvc.perform(adminPost(FEEDS, "{\"url\":\"https://example.test/rss.xml\",\"topic\":\"TECH\",\"sourceId\":99}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("SOURCE_NOT_FOUND"));
     }
 
     @Test

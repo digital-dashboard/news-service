@@ -119,6 +119,38 @@ class FeedServiceTest {
     }
 
     @Test
+    void explicitSourceNotFoundGives404BeforeAnyDownload() {
+        when(sources.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.create(new CreateFeedRequest(URL, null, Topic.TECH, 99L)))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.code()).isEqualTo(ErrorCode.SOURCE_NOT_FOUND);
+                });
+        verifyNoInteractions(loader);
+        verify(inserter, never()).insert(any());
+    }
+
+    @Test
+    void explicitSourceAttachesFeedAndTagsTimerWithSourceKey() {
+        loads("Example", null);
+        Source explicit = mock(Source.class);
+        when(explicit.getId()).thenReturn(42L);
+        when(explicit.getKey()).thenReturn("explicit.test");
+        when(sources.findById(42L)).thenReturn(Optional.of(explicit));
+        when(inserter.insert(any())).thenReturn(Optional.of(9L));
+        Feed stored = storedFeed();
+        when(feeds.findWithSourceById(9L)).thenReturn(Optional.of(stored));
+
+        service.create(new CreateFeedRequest(URL, null, Topic.TECH, 42L));
+
+        ArgumentCaptor<NewFeed> inserted = ArgumentCaptor.forClass(NewFeed.class);
+        verify(inserter).insert(inserted.capture());
+        assertThat(inserted.getValue().sourceId()).isEqualTo(42L);
+        verify(timer).completed("explicit.test", 100);
+        verify(sources, never()).findOrCreate(any(), any());
+    }
+
+    @Test
     void theDefaultedNameIsCutToTheColumnWidthAndAnOverlongLanguageIsDropped() {
         loads("T".repeat(300), "x".repeat(20));
         when(inserter.insert(any())).thenReturn(Optional.of(9L));
