@@ -28,7 +28,9 @@ public final class MetricCatalogue {
             new MeterSpec(MetricNames.FEED_STATE, MeterKind.GAUGE, null, Set.of(FEED_ID, STATE)),
             new MeterSpec(MetricNames.FEED_CONSECUTIVE_FAILURES, MeterKind.GAUGE, null, Set.of(FEED_ID)),
             new MeterSpec(MetricNames.FEED_SINCE_LAST_SUCCESS, MeterKind.GAUGE, "seconds", Set.of(FEED_ID)),
-            new MeterSpec(MetricNames.POLL_LAST_SUCCESS, MeterKind.GAUGE, "seconds", Set.of()));
+            new MeterSpec(MetricNames.POLL_LAST_SUCCESS, MeterKind.GAUGE, "seconds", Set.of()),
+            new MeterSpec(MetricNames.INGEST_LINK_FALLBACK, MeterKind.COUNTER, null, Set.of(SOURCE, OUTCOME)),
+            new MeterSpec(MetricNames.INGEST_LOCK_WAIT, MeterKind.TIMER, null, Set.of(SOURCE)));
 
     private static final Set<String> ALLOWED_TAGS = MetricNames.Tags.all();
 

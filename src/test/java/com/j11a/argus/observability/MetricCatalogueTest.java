@@ -67,7 +67,7 @@ class MetricCatalogueTest {
                 MetricNames.FETCH, MetricNames.INGEST, MetricNames.FETCH_SIZE, MetricNames.INGEST_ENTRIES,
                 MetricNames.PARSE_MISSING, MetricNames.POLL, MetricNames.FETCH_RETRY, MetricNames.SCHEDULED_JOB,
                 MetricNames.FEED_STATE, MetricNames.FEED_CONSECUTIVE_FAILURES, MetricNames.FEED_SINCE_LAST_SUCCESS,
-                MetricNames.POLL_LAST_SUCCESS);
+                MetricNames.POLL_LAST_SUCCESS, MetricNames.INGEST_LINK_FALLBACK, MetricNames.INGEST_LOCK_WAIT);
         assertThat(MetricCatalogue.all()).filteredOn(spec -> spec.name().equals(MetricNames.FETCH_SIZE))
                 .singleElement().satisfies(spec -> assertThat(spec.prometheusBase())
                         .isEqualTo("argus_fetch_size_bytes"));
@@ -77,5 +77,22 @@ class MetricCatalogueTest {
         assertThat(MetricCatalogue.all()).filteredOn(spec -> spec.name().equals(MetricNames.POLL_LAST_SUCCESS))
                 .singleElement().satisfies(spec -> assertThat(spec.prometheusBase())
                         .isEqualTo("argus_poll_last_success_seconds"));
+    }
+
+    @Test
+    void cataloguesLinkFallbackAndLockWaitMeters() {
+        assertThat(MetricCatalogue.all()).filteredOn(spec -> spec.name().equals(MetricNames.INGEST_LINK_FALLBACK))
+                .singleElement().satisfies(spec -> {
+                    assertThat(spec.kind()).isEqualTo(MeterKind.COUNTER);
+                    assertThat(spec.baseUnit()).isNull();
+                    assertThat(spec.tags()).containsExactlyInAnyOrder(MetricNames.Tags.SOURCE, MetricNames.Tags.OUTCOME);
+                });
+        assertThat(MetricCatalogue.all()).filteredOn(spec -> spec.name().equals(MetricNames.INGEST_LOCK_WAIT))
+                .singleElement().satisfies(spec -> {
+                    assertThat(spec.kind()).isEqualTo(MeterKind.TIMER);
+                    assertThat(spec.baseUnit()).isNull();
+                    assertThat(spec.tags()).containsExactly(MetricNames.Tags.SOURCE);
+                    assertThat(spec.prometheusBase()).isEqualTo("argus_ingest_lock_wait_seconds");
+                });
     }
 }
