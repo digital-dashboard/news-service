@@ -7,7 +7,6 @@ import com.j11a.argus.feed.fetch.RetryingFeedFetcher;
 import com.j11a.argus.feed.parse.FeedParseException;
 import com.j11a.argus.feed.parse.FeedParser;
 import com.j11a.argus.feed.parse.ParsedFeed;
-import io.micrometer.core.instrument.Timer;
 import java.net.URI;
 import java.time.Clock;
 import java.time.Instant;
@@ -25,13 +24,6 @@ public class FeedLoader {
     public sealed interface Loaded {
 
         record Parsed(ParsedFeed feed, Instant fetchedAt, FetchValidators validators) implements Loaded {
-            public Parsed(ParsedFeed feed, Instant fetchedAt) {
-                this(feed, fetchedAt, FetchValidators.EMPTY);
-            }
-        }
-
-        record CreateParsed(ParsedFeed feed, Instant fetchedAt, FetchValidators validators, int bodyLength,
-                            Timer.Sample sample) implements Loaded {
         }
 
         record NotModified(FetchResult.NotModified notModified) implements Loaded {
@@ -46,6 +38,17 @@ public class FeedLoader {
             public String lastError() {
                 return httpStatus != null ? reason + " " + httpStatus : reason;
             }
+        }
+    }
+
+    /** The result of the first download on the create path, which has no stored feed, source or validators yet. */
+    public sealed interface CreateLoaded {
+
+        record Created(ParsedFeed feed, Instant fetchedAt, FetchValidators validators, int bodyLength)
+                implements CreateLoaded {
+        }
+
+        record Failed(String reason) implements CreateLoaded {
         }
     }
 
@@ -64,10 +67,6 @@ public class FeedLoader {
         this.clock = clock;
     }
 
-    public Loaded load(URI url, String sourceKey) {
-        return load(url, FetchValidators.EMPTY, sourceKey);
-    }
-
     public Loaded load(URI url, FetchValidators validators, String sourceKey) {
         return switch (telemetry.fetch(sourceKey, () -> retryingFetcher.fetch(url, validators, sourceKey))) {
             case FetchResult.Failed failed -> new Loaded.Failed(failed.reason().tag(), failed.httpStatus());
@@ -76,33 +75,32 @@ public class FeedLoader {
         };
     }
 
-    public Loaded loadForCreate(URI url) {
-        Timer.Sample sample = telemetry.startTimerSample();
-        FetchResult result = telemetry.span(FETCH_SPAN, () -> fetcher.fetch(url));
-        return switch (result) {
+    public IngestTelemetry.CreateFetchTimer startCreateFetch() {
+        return telemetry.startCreateFetch();
+    }
+
+    public CreateLoaded loadForCreate(URI url, IngestTelemetry.CreateFetchTimer timer) {
+        return switch (telemetry.span(FETCH_SPAN, () -> fetcher.fetch(url))) {
             case FetchResult.Failed failed -> {
-                telemetry.recordFailedCreateFetch(sample, failed.reason().tag());
-                yield new Loaded.Failed(failed.reason().tag(), failed.httpStatus());
+                timer.failed(failed.reason().tag());
+                yield new CreateLoaded.Failed(failed.reason().tag());
             }
-            case FetchResult.NotModified notModified -> {
-                telemetry.recordFailedCreateFetch(sample, "not_modified");
-                yield new Loaded.Failed("not_modified");
+            case FetchResult.NotModified ignored -> {
+                timer.failed(IngestTelemetry.NOT_MODIFIED);
+                yield new CreateLoaded.Failed(IngestTelemetry.NOT_MODIFIED);
             }
-            case FetchResult.Fetched fetched -> {
-                try {
-                    ParsedFeed feed = telemetry.span(PARSE_SPAN, () -> parse(fetched));
-                    yield new Loaded.CreateParsed(feed, clock.instant(), fetched.validators(),
-                            fetched.body().length, sample);
-                } catch (ParseFailure e) {
-                    telemetry.recordFailedCreateParse(sample);
-                    yield new Loaded.Failed(e.reason);
-                }
-            }
+            case FetchResult.Fetched fetched -> parseForCreate(fetched, timer);
         };
     }
 
-    public void completeCreateTelemetry(Loaded.CreateParsed loaded, String sourceKey) {
-        telemetry.recordCreateFetch(loaded.sample(), sourceKey, loaded.bodyLength());
+    private CreateLoaded parseForCreate(FetchResult.Fetched fetched, IngestTelemetry.CreateFetchTimer timer) {
+        try {
+            ParsedFeed feed = telemetry.span(PARSE_SPAN, () -> parse(fetched));
+            return new CreateLoaded.Created(feed, clock.instant(), fetched.validators(), fetched.body().length);
+        } catch (ParseFailure e) {
+            timer.parseFailed();
+            return new CreateLoaded.Failed(e.reason);
+        }
     }
 
     private Loaded parseFetched(FetchResult.Fetched fetched, Instant fetchedAt) {

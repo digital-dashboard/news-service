@@ -16,8 +16,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.j11a.argus.config.WebMvcConfig;
 import com.j11a.argus.feed.Topic;
+import com.j11a.argus.feed.health.FeedState;
 import com.j11a.argus.feed.poll.AggregatePollReport;
 import com.j11a.argus.feed.poll.FeedPoller;
+import com.j11a.argus.feed.poll.PollInterruptedException;
 import com.j11a.argus.feed.poll.PollTrigger;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.IngestReport;
@@ -41,6 +43,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
+import org.springframework.resilience.InvocationRejectedException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -72,7 +75,7 @@ class FeedControllerTest {
     private static FeedResponse feed(long id) {
         return new FeedResponse(id, "Example", "https://example.test/rss.xml", "https://example.test", Topic.TECH,
                 true, new SourceSummary(3, "example.test", "https://example.test", null),
-                Instant.parse("2026-10-02T10:00:00Z"));
+                Instant.parse("2026-10-02T10:00:00Z"), null, null, null, 0, FeedState.HEALTHY);
     }
 
     @Test
@@ -299,12 +302,21 @@ class FeedControllerTest {
     @Test
     void refreshAllWhenPollInProgressReturns409() throws Exception {
         when(poller.poll(PollTrigger.MANUAL)).thenThrow(
-                new org.springframework.resilience.InvocationRejectedException("running", poller));
+                new InvocationRejectedException("running", poller));
 
         mockMvc.perform(post(FEEDS + "/refresh").header(AdminKeys.HEADER, AdminKeys.VALID))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("POLL_IN_PROGRESS"))
                 .andExpect(jsonPath("$.type").value("urn:argus:problem:poll-in-progress"));
+    }
+
+    @Test
+    void refreshAllInterruptedByShutdownReturns503() throws Exception {
+        when(poller.poll(PollTrigger.MANUAL)).thenThrow(new PollInterruptedException(new InterruptedException()));
+
+        mockMvc.perform(post(FEEDS + "/refresh").header(AdminKeys.HEADER, AdminKeys.VALID))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("SERVICE_UNAVAILABLE"));
     }
 
     @Test
@@ -344,7 +356,7 @@ class FeedControllerTest {
     void patchEnablesOrDisablesFeedAndReturnsUpdatedFeed() throws Exception {
         FeedResponse updated = new FeedResponse(42, "Example", "https://example.test/rss.xml", null, Topic.TECH,
                 false, new SourceSummary(3, "example.test", "https://example.test", null),
-                Instant.parse("2026-10-02T10:00:00Z"), null, null, null, 0, "disabled");
+                Instant.parse("2026-10-02T10:00:00Z"), null, null, null, 0, FeedState.DISABLED);
         when(feeds.patch(eq(42L), any())).thenReturn(updated);
 
         mockMvc.perform(patch(FEEDS + "/42").header(AdminKeys.HEADER, AdminKeys.VALID)

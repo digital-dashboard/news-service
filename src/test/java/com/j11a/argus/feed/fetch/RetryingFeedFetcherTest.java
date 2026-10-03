@@ -1,55 +1,40 @@
 package com.j11a.argus.feed.fetch;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.j11a.argus.feed.fetch.FetchResult.Failed;
+import com.j11a.argus.observability.MetricNames;
 import com.j11a.argus.testsupport.FeedStubServer;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.time.Duration;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.autoconfigure.AutoConfigurations;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.http.client.autoconfigure.HttpClientAutoConfiguration;
-import org.springframework.boot.restclient.autoconfigure.RestClientAutoConfiguration;
-import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
-import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
-import org.springframework.resilience.annotation.EnableResilientMethods;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.util.unit.DataSize;
 import org.springframework.web.client.RestClient;
 
 class RetryingFeedFetcherTest {
 
-    @Configuration(proxyBeanMethods = false)
-    @EnableResilientMethods
-    @EnableConfigurationProperties(FetchProperties.class)
-    @Import({RetryingFeedFetcher.class, RetryableFeedFetcher.class})
-    static class TestConfig {
+    private static final String SOURCE = "test-source";
+    private static final String DOWN = "/down";
+    private static final Duration READ_TIMEOUT = Duration.ofMillis(200);
+    private static final Duration LONG_TIMEOUT = Duration.ofSeconds(5);
 
-        @Bean
-        FeedFetcher feedFetcher(RestClient.Builder builder, FetchProperties properties) {
-            return new FeedFetcher(builder, properties);
-        }
-    }
-
+    private final MeterRegistry meters = new SimpleMeterRegistry();
     private FeedStubServer server;
-
-    private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withInitializer(new ConfigDataApplicationContextInitializer())
-            .withConfiguration(AutoConfigurations.of(
-                    HttpClientAutoConfiguration.class,
-                    RestClientAutoConfiguration.class))
-            .withUserConfiguration(TestConfig.class)
-            .withPropertyValues(
-                    "argus.fetch.retry.max-retries=2",
-                    "argus.fetch.retry.delay=10ms",
-                    "argus.fetch.retry.multiplier=1.5",
-                    "argus.fetch.retry.timeout=2s",
-                    "spring.http.clients.read-timeout=200ms"
-            );
 
     @BeforeEach
     void startServer() throws IOException {
@@ -59,79 +44,144 @@ class RetryingFeedFetcherTest {
     @AfterEach
     void stopServer() {
         server.close();
+        Thread.interrupted();
+    }
+
+    private static FetchProperties properties(int maxRetries, Duration delay, Duration timeout) {
+        return new FetchProperties("Argus-Test/1.0", DataSize.ofKilobytes(64), 5,
+                new FetchProperties.Retry(maxRetries, delay, 1.5, timeout));
+    }
+
+    private RetryingFeedFetcher retrying(int maxRetries, Duration delay, Duration timeout) {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .connectTimeout(Duration.ofSeconds(2))
+                .build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(READ_TIMEOUT);
+        FetchProperties properties = properties(maxRetries, delay, timeout);
+        FeedFetcher fetcher = new FeedFetcher(RestClient.builder().requestFactory(factory), properties);
+        return new RetryingFeedFetcher(fetcher, properties, meters);
+    }
+
+    private FetchResult fetch(RetryingFeedFetcher fetcher, String path) {
+        return fetcher.fetch(URI.create(server.baseUrl() + path), FetchValidators.EMPTY, SOURCE);
+    }
+
+    private double retries() {
+        Counter counter = meters.find(MetricNames.FETCH_RETRY).tag(MetricNames.Tags.SOURCE, SOURCE).counter();
+        return counter == null ? 0 : counter.count();
     }
 
     @Test
-    void status503IsRetriedTwiceThenGivesFailedWithExactlyThreeRequests() {
-        server.serve("/down", 503, "text/plain", FeedStubServer.utf8("unavailable"));
+    void status503IsRetriedTwiceGivingExactlyThreeRequestsAndTwoCountedRetries() {
+        server.serve(DOWN, 503, "text/plain", FeedStubServer.utf8("unavailable"));
 
-        runner.run(context -> {
-            RetryingFeedFetcher fetcher = context.getBean(RetryingFeedFetcher.class);
-            FetchResult result = fetcher.fetch(URI.create(server.baseUrl() + "/down"), FetchValidators.EMPTY, "test-source");
+        FetchResult result = fetch(retrying(2, Duration.ofMillis(10), LONG_TIMEOUT), DOWN);
 
-            assertThat(result).isEqualTo(new Failed(FetchFailureReason.HTTP_STATUS, 503));
-            assertThat(server.requestsTo("/down")).hasSize(3);
-        });
+        assertThat(result).isEqualTo(new Failed(FetchFailureReason.HTTP_STATUS, 503));
+        assertThat(server.requestsTo(DOWN)).hasSize(3);
+        assertThat(retries()).isEqualTo(2.0);
+    }
+
+    @Test
+    void zeroMaxRetriesMakesOneRequestAndCountsNoRetry() {
+        server.serve(DOWN, 503, "text/plain", FeedStubServer.utf8("unavailable"));
+
+        FetchResult result = fetch(retrying(0, Duration.ofMillis(10), LONG_TIMEOUT), DOWN);
+
+        assertThat(result).isEqualTo(new Failed(FetchFailureReason.HTTP_STATUS, 503));
+        assertThat(server.requestsTo(DOWN)).hasSize(1);
+        assertThat(retries()).isZero();
     }
 
     @Test
     void status404IsNeverRetried() {
         server.serve("/missing", 404, "text/plain", FeedStubServer.utf8("not found"));
 
-        runner.run(context -> {
-            RetryingFeedFetcher fetcher = context.getBean(RetryingFeedFetcher.class);
-            FetchResult result = fetcher.fetch(URI.create(server.baseUrl() + "/missing"), FetchValidators.EMPTY, "test-source");
+        FetchResult result = fetch(retrying(2, Duration.ofMillis(10), LONG_TIMEOUT), "/missing");
 
-            assertThat(result).isEqualTo(new Failed(FetchFailureReason.HTTP_STATUS, 404));
-            assertThat(server.requestsTo("/missing")).hasSize(1);
-        });
+        assertThat(result).isEqualTo(new Failed(FetchFailureReason.HTTP_STATUS, 404));
+        assertThat(server.requestsTo("/missing")).hasSize(1);
+        assertThat(retries()).isZero();
     }
 
     @Test
-    void timeoutIsRetried() {
+    void aTimeoutIsRetried() {
         server.stallBeforeHeaders("/slow", 500);
 
-        runner.run(context -> {
-            RetryingFeedFetcher fetcher = context.getBean(RetryingFeedFetcher.class);
-            FetchResult result = fetcher.fetch(URI.create(server.baseUrl() + "/slow"), FetchValidators.EMPTY, "test-source");
+        FetchResult result = fetch(retrying(2, Duration.ofMillis(10), LONG_TIMEOUT), "/slow");
 
-            assertThat(result).isEqualTo(new Failed(FetchFailureReason.TIMEOUT, null));
-            assertThat(server.requestsTo("/slow")).hasSize(3);
-        });
+        assertThat(result).isEqualTo(new Failed(FetchFailureReason.TIMEOUT, null));
+        assertThat(server.requestsTo("/slow")).hasSize(3);
+        assertThat(retries()).isEqualTo(2.0);
     }
 
     @Test
-    void redirectsAreNotRetriedPerHop() {
+    void aRetryRepeatsTheWholeRedirectChainRatherThanTheLastHop() {
         server.redirect("/hop1", 302, "/hop2")
                 .serve("/hop2", 503, "text/plain", FeedStubServer.utf8("unavailable"));
 
-        runner.run(context -> {
-            RetryingFeedFetcher fetcher = context.getBean(RetryingFeedFetcher.class);
-            FetchResult result = fetcher.fetch(URI.create(server.baseUrl() + "/hop1"), FetchValidators.EMPTY, "test-source");
+        FetchResult result = fetch(retrying(2, Duration.ofMillis(10), LONG_TIMEOUT), "/hop1");
 
-            assertThat(result).isEqualTo(new Failed(FetchFailureReason.HTTP_STATUS, 503));
-            // 3 attempts total, each attempt requests /hop1 then /hop2
-            assertThat(server.requestsTo("/hop1")).hasSize(3);
-            assertThat(server.requestsTo("/hop2")).hasSize(3);
-        });
+        assertThat(result).isEqualTo(new Failed(FetchFailureReason.HTTP_STATUS, 503));
+        assertThat(server.requestsTo("/hop1")).hasSize(3);
+        assertThat(server.requestsTo("/hop2")).hasSize(3);
     }
 
     @Test
-    void overallTimeoutBudgetIsRespected() {
-        server.serve("/down", 503, "text/plain", FeedStubServer.utf8("unavailable"));
+    void theOverallTimeoutStopsRetryingBeforeMaxRetriesIsReached() {
+        server.serve(DOWN, 503, "text/plain", FeedStubServer.utf8("unavailable"));
 
-        // With 50ms delay and 25ms timeout budget, the second attempt will exceed the 25ms budget
-        runner.withPropertyValues(
-                "argus.fetch.retry.max-retries=5",
-                "argus.fetch.retry.delay=50ms",
-                "argus.fetch.retry.timeout=25ms"
-        ).run(context -> {
-            RetryingFeedFetcher fetcher = context.getBean(RetryingFeedFetcher.class);
-            FetchResult result = fetcher.fetch(URI.create(server.baseUrl() + "/down"), FetchValidators.EMPTY, "test-source");
+        FetchResult result = fetch(retrying(10, Duration.ofMillis(300), Duration.ofMillis(400)), DOWN);
 
-            assertThat(result).isEqualTo(new Failed(FetchFailureReason.HTTP_STATUS, 503));
-            // Should abort before exhausting all 5 retries (1 initial + at most 1 retry)
-            assertThat(server.requestsTo("/down").size()).isLessThan(4);
-        });
+        assertThat(result).isEqualTo(new Failed(FetchFailureReason.HTTP_STATUS, 503));
+        // 1 initial request and 1 retry after 300ms; the next back-off (450ms) would exceed the 400ms budget.
+        assertThat(server.requestsTo(DOWN)).hasSize(2);
+        assertThat(retries()).isEqualTo(1.0);
+    }
+
+    @Test
+    void anInterruptedBackOffStopsRetryingKeepsTheFlagAndReturnsTheLastFailure() {
+        server.serve(DOWN, 503, "text/plain", FeedStubServer.utf8("unavailable"));
+        RetryingFeedFetcher fetcher = retrying(2, Duration.ofSeconds(30), Duration.ofMinutes(5));
+        Thread caller = Thread.currentThread();
+        ScheduledExecutorService interrupter = Executors.newSingleThreadScheduledExecutor();
+        interrupter.schedule(caller::interrupt, 300, TimeUnit.MILLISECONDS);
+
+        FetchResult result;
+        try {
+            result = fetch(fetcher, DOWN);
+        } finally {
+            interrupter.shutdownNow();
+        }
+
+        assertThat(result).isEqualTo(new Failed(FetchFailureReason.HTTP_STATUS, 503));
+        assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        assertThat(server.requestsTo(DOWN)).hasSize(1);
+        assertThat(retries()).isZero();
+    }
+
+    @Test
+    void aFailureThatIsNotAFetchFailureIsRethrownAndNeverRetried() {
+        FeedFetcher fetcher = mock(FeedFetcher.class);
+        when(fetcher.fetchRetryable(any(), any())).thenThrow(new IllegalArgumentException("bug"));
+        RetryingFeedFetcher retrying = new RetryingFeedFetcher(fetcher, properties(2, Duration.ofMillis(1), LONG_TIMEOUT), meters);
+
+        assertThatThrownBy(() -> fetch(retrying, "/anything"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("bug");
+        assertThat(retries()).isZero();
+    }
+
+    @Test
+    void anErrorIsWrappedAndNeverRetried() {
+        FeedFetcher fetcher = mock(FeedFetcher.class);
+        when(fetcher.fetchRetryable(any(), any())).thenThrow(new LinkageError("broken"));
+        RetryingFeedFetcher retrying = new RetryingFeedFetcher(fetcher, properties(2, Duration.ofMillis(1), LONG_TIMEOUT), meters);
+
+        assertThatThrownBy(() -> fetch(retrying, "/anything"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasCauseInstanceOf(LinkageError.class);
     }
 }

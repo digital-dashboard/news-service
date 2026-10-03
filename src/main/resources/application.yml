@@ -28,6 +28,11 @@ spring:
       add-mappings: false
   lifecycle:
     timeout-per-shutdown-phase: 30s
+  task:
+    scheduling:
+      shutdown:
+        # Boot's default, kept explicit: closing the scheduler interrupts a running poll instead of awaiting it.
+        await-termination: false
   http:
     clients:
       connect-timeout: ${ARGUS_FETCH_CONNECT_TIMEOUT:5s}

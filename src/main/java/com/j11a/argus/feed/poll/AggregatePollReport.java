@@ -20,20 +20,11 @@ public record AggregatePollReport(
 
     public static AggregatePollReport of(
             String pollId, PollTrigger trigger, Duration duration, List<IngestReport> reports) {
-        int succeeded = 0;
-        int notModified = 0;
-        int failed = 0;
         int entriesSeen = 0;
         int inserted = 0;
         int unchanged = 0;
         int skipped = 0;
-
         for (IngestReport r : reports) {
-            switch (r.outcome()) {
-                case COMPLETED -> succeeded++;
-                case NOT_MODIFIED -> notModified++;
-                case FAILED -> failed++;
-            }
             entriesSeen += r.entriesSeen();
             inserted += r.inserted();
             unchanged += r.unchanged();
@@ -45,13 +36,17 @@ public record AggregatePollReport(
                 trigger,
                 duration.toMillis(),
                 reports.size(),
-                succeeded,
-                notModified,
-                failed,
+                count(reports, IngestReport.Outcome.COMPLETED),
+                count(reports, IngestReport.Outcome.NOT_MODIFIED),
+                count(reports, IngestReport.Outcome.FAILED),
                 entriesSeen,
                 inserted,
                 unchanged,
                 skipped,
                 List.copyOf(reports));
+    }
+
+    private static int count(List<IngestReport> reports, IngestReport.Outcome outcome) {
+        return (int) reports.stream().filter(report -> report.outcome() == outcome).count();
     }
 }

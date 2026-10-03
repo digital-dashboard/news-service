@@ -7,8 +7,11 @@ import com.j11a.argus.feed.NewFeed;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
 import com.j11a.argus.feed.parse.ParsedFeed;
+import com.j11a.argus.feed.poll.PollProperties;
 import com.j11a.argus.ingest.FeedIngestService;
+import com.j11a.argus.ingest.FailureReasons;
 import com.j11a.argus.ingest.FeedLoader;
+import com.j11a.argus.ingest.IngestTelemetry;
 import com.j11a.argus.security.AdminAccess;
 import com.j11a.argus.source.Source;
 import com.j11a.argus.source.SourceResolver;
@@ -16,10 +19,9 @@ import com.j11a.argus.source.SourceService;
 import com.j11a.argus.url.Links;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
-import com.j11a.argus.config.PollProperties;
 import java.net.URI;
 import java.time.Clock;
-import java.util.List;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
@@ -32,10 +34,6 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * Deliberately not transactional: the download must not hold a connection. The source upsert and the feed insert
- * each commit on their own.
- */
 @Service
 public class FeedService {
 
@@ -45,6 +43,11 @@ public class FeedService {
     static final int MAX_NAME_LENGTH = 255;
     /** feed.language is varchar(16). */
     static final int MAX_LANGUAGE_LENGTH = 16;
+    private static final String DELETE_OWNED_ARTICLES = """
+            DELETE FROM article a USING article_feed mine
+            WHERE mine.feed_id = :feedId AND mine.article_id = a.id
+              AND NOT EXISTS (SELECT 1 FROM article_feed o WHERE o.article_id = a.id AND o.feed_id <> :feedId)
+            """;
 
     private final FeedRepository feeds;
     private final FeedInserter inserter;
@@ -72,6 +75,10 @@ public class FeedService {
         this.clock = clock;
     }
 
+    /**
+     * Deliberately not transactional: the download must not hold a connection. The source upsert and the feed insert
+     * each commit on their own. Retries and conditional GET do not apply here: the create path makes one attempt.
+     */
     public FeedResponse create(CreateFeedRequest request) {
         String url = Links.clean(request.url());
         if (url == null) {
@@ -81,78 +88,81 @@ public class FeedService {
             throw conflict(Optional.of(existingId));
         });
         URI uri = URI.create(url);
-        FeedLoader.Loaded.CreateParsed loaded = download(uri);
+        IngestTelemetry.CreateFetchTimer timer = loader.startCreateFetch();
+        FeedLoader.CreateLoaded.Created loaded = download(uri, timer);
         ParsedFeed parsed = loaded.feed();
         Source source = sources.findOrCreate(SourceResolver.keyFor(parsed.siteLink(), uri), parsed.siteLink());
-        loader.completeCreateTelemetry(loaded, source.getKey());
+        timer.completed(source.getKey(), loaded.bodyLength());
         long id = inserter.insert(new NewFeed(source.getId(), nameFor(request, parsed, source), url,
                         Links.clean(parsed.siteLink()), request.topic(), languageOf(parsed)))
                 .orElseThrow(() -> conflict(inserter.findIdByUrl(url)));
-        Feed feed = feeds.findWithSourceById(id).orElseThrow();
+        Feed feed = requireFeed(id);
         // The feed is committed, so a failed first ingest must not turn a successful create into an error.
         try {
             ingest.ingestParsed(feed, parsed, loaded.fetchedAt());
             healthUpdater.recordSuccess(feed.getId(), loaded.validators(), clock.instant());
         } catch (RuntimeException e) {
             LOG.error("First ingest of feed {} failed; the feed was created and a refresh will retry", feed.getId(), e);
-            healthUpdater.recordFailure(feed.getId(), "first_ingest_failed", clock.instant());
+            healthUpdater.recordFailure(feed.getId(), FailureReasons.FIRST_INGEST_FAILED, clock.instant());
         } finally {
-            healthGauges.refresh();
+            healthGauges.refreshAfterCommit();
         }
-        return FeedResponse.of(feed, AdminAccess.isAdmin(), properties.failingThreshold());
+        return toResponse(feed);
     }
 
     public FeedResponse get(long id) {
-        Feed feed = feeds.findWithSourceById(id)
-                .orElseThrow(() -> new ApiException(ErrorCode.FEED_NOT_FOUND, "Feed " + id + " does not exist."));
-        return FeedResponse.of(feed, AdminAccess.isAdmin(), properties.failingThreshold());
+        return toResponse(requireFeed(id));
     }
 
     @Transactional(readOnly = true)
     public Page<FeedResponse> list(int page, int size) {
         PageRequest pageRequest = PageRequest.of(page, size, Sort.by("id").ascending());
-        return feeds.findAll(pageRequest)
-                .map(feed -> FeedResponse.of(feed, AdminAccess.isAdmin(), properties.failingThreshold()));
+        return feeds.findAll(pageRequest).map(this::toResponse);
     }
 
+    /** One atomic UPDATE, so a health write that lands meanwhile is never reverted by a stale entity save. */
     @Transactional
     public FeedResponse patch(long id, PatchFeedRequest request) {
-        Feed feed = feeds.findWithSourceById(id)
-                .orElseThrow(() -> new ApiException(ErrorCode.FEED_NOT_FOUND, "Feed " + id + " does not exist."));
-        feed.setEnabled(request.enabled());
-        Feed saved = feeds.save(feed);
-        healthGauges.refresh();
-        return FeedResponse.of(saved, AdminAccess.isAdmin(), properties.failingThreshold());
+        int updated = jdbc.sql("UPDATE feed SET enabled = :enabled, updated_at = :now WHERE id = :id")
+                .param("enabled", request.enabled())
+                .param("now", clock.instant().atOffset(ZoneOffset.UTC))
+                .param("id", id)
+                .update();
+        if (updated == 0) {
+            throw notFound(id);
+        }
+        healthGauges.refreshAfterCommit();
+        return toResponse(requireFeed(id));
     }
 
+    /** Removes the feed and the articles only it linked to, in one transaction. The source row is kept. */
     @Transactional
     public void delete(long id) {
-        Feed feed = feeds.findById(id)
-                .orElseThrow(() -> new ApiException(ErrorCode.FEED_NOT_FOUND, "Feed " + id + " does not exist."));
-        List<Long> articleIds = jdbc.sql("SELECT article_id FROM article_feed WHERE feed_id = :feedId")
-                .param("feedId", id)
-                .query(Long.class)
-                .list();
-        feeds.delete(feed);
-        feeds.flush();
-        if (!articleIds.isEmpty()) {
-            jdbc.sql("""
-                    DELETE FROM article
-                    WHERE id IN (:ids)
-                      AND NOT EXISTS (SELECT 1 FROM article_feed af WHERE af.article_id = article.id)
-                    """)
-                    .param("ids", articleIds)
-                    .update();
+        jdbc.sql(DELETE_OWNED_ARTICLES).param("feedId", id).update();
+        int deleted = jdbc.sql("DELETE FROM feed WHERE id = :id").param("id", id).update();
+        if (deleted == 0) {
+            throw notFound(id);
         }
-        healthGauges.refresh();
+        healthGauges.refreshAfterCommit();
     }
 
-    private FeedLoader.Loaded.CreateParsed download(URI uri) {
-        return switch (loader.loadForCreate(uri)) {
-            case FeedLoader.Loaded.CreateParsed parsed -> parsed;
-            case FeedLoader.Loaded.Failed(var reason, var ignored) ->
+    private Feed requireFeed(long id) {
+        return feeds.findWithSourceById(id).orElseThrow(() -> notFound(id));
+    }
+
+    private FeedResponse toResponse(Feed feed) {
+        return FeedResponse.of(feed, AdminAccess.isAdmin(), properties.failingThreshold());
+    }
+
+    private static ApiException notFound(long id) {
+        return new ApiException(ErrorCode.FEED_NOT_FOUND, "Feed " + id + " does not exist.");
+    }
+
+    private FeedLoader.CreateLoaded.Created download(URI uri, IngestTelemetry.CreateFetchTimer timer) {
+        return switch (loader.loadForCreate(uri, timer)) {
+            case FeedLoader.CreateLoaded.Created created -> created;
+            case FeedLoader.CreateLoaded.Failed(var reason) ->
                     throw new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", reason));
-            default -> throw new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", "unknown"));
         };
     }
 

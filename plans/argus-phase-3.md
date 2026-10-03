@@ -100,11 +100,11 @@
 | Package | Component | Responsibility |
 |---|---|---|
 | `feed.fetch` | `FeedFetcher` | Sends a conditional GET (`If-None-Match` / `If-Modified-Since` from the stored validators) on the first hop. Captures `ETag` / `Last-Modified` from the final 200, maps 304 to `NotModified`, and keeps the per-hop URL validation. |
-| `feed.fetch` | `RetryingFeedFetcher` | A Spring bean whose single `fetch(url, validators, sourceKey)` method is `@Retryable(includes = RetryableFetchException.class, maxRetriesString = …, delayString = …, multiplierString = …, timeoutString = …)`. It throws `RetryableFetchException` on 5xx or transient I/O, and converts exhaustion into `Failed`. **`sourceKey` is a method argument** so the retry listener can tag by the stored source. |
+| `feed.fetch` | `RetryingFeedFetcher` | (Superseded by Review fixes: a programmatic `RetryTemplate`, no `@Retryable`.) A Spring bean whose single `fetch(url, validators, sourceKey)` method is `@Retryable(includes = RetryableFetchException.class, maxRetriesString = …, delayString = …, multiplierString = …, timeoutString = …)`. It throws `RetryableFetchException` on 5xx or transient I/O, and converts exhaustion into `Failed`. **`sourceKey` is a method argument** so the retry listener can tag by the stored source. |
 | `feed.fetch` | `FetchResult` | A sealed interface with three cases: `Fetched(body, contentType, finalUrl, permanentTarget, validators)`, `NotModified(finalUrl, permanentTarget, validators)` and `Failed(reason, httpStatus)`. `validators` is a small record (`etag`, `lastModified`). |
 | `feed.health` | `FeedHealthUpdater` | Records health with **atomic SQL** through `JdbcClient`, so a manual refresh and a poll can't lose updates. It has three methods, `recordSuccess`, `recordNotModified` and `recordFailure`; each runs in its own short transaction, separate from the persist transaction, so a failed ingest is still recorded. A missing feed (deleted mid-poll) updates 0 rows and is ignored. |
 | `feed.health` | `FeedHealthGauges` | Holds the `MultiGauge`s from decision 8, with value functions. `refresh()` re-reads the feed rows and re-registers them with `overwrite = true`. It is called at startup (`ApplicationReadyEvent`) and by the events in decision 8. |
-| `feed.fetch` | `RetryTelemetryListener` | `@EventListener(MethodRetryEvent)` for `RetryingFeedFetcher.fetch` only. It reads `sourceKey` from the invocation arguments and increments `argus.fetch.retry{source}`. |
+| `feed.fetch` | `RetryTelemetryListener` | (Removed by Review fixes: a `RetryListener` inside `RetryingFeedFetcher` does this.) `@EventListener(MethodRetryEvent)` for `RetryingFeedFetcher.fetch` only. It reads `sourceKey` from the invocation arguments and increments `argus.fetch.retry{source}`. |
 | `feed.poll` | `FeedPoller` | `poll(trigger)` is annotated `@ConcurrencyLimit(value = 1, policy = REJECT)`. It reads the enabled feeds fresh from the database, fans out on a virtual-thread `SimpleAsyncTaskExecutor` (`concurrencyLimit` = `argus.poll.concurrency`, `ContextPropagatingTaskDecorator`, a `taskTerminationTimeout` for shutdown) and waits for all feeds. It aggregates the `AggregatePollReport`. Each feed is isolated: one feed's exception becomes a FAILED report and never aborts the poll. |
 | `feed.poll` | `FeedPollingScheduler` | `@Scheduled(cron = "${argus.poll.cron}")` calls `FeedPoller.poll(SCHEDULED)`. It records `argus.scheduled.job{scheduled_job=poll, outcome}`: `success`, `skipped` (on `InvocationRejectedException`) or `error` (any other exception, logged and swallowed so later runs continue). |
 | `feed.poll` | `PollingTelemetry` | Owns the root `argus.poll` Observation and the `argus.poll.last.success` gauge (epoch seconds of the last completed poll). It puts `pollId` in MDC on the orchestrator thread; the decorator copies it to the workers. It writes one INFO summary line per poll. |
@@ -128,15 +128,15 @@ The file is `src/main/resources/db/changelog/changes/06-add-feed-health.yaml`, i
 
 | Name | Kind | Tags | Prometheus series |
 |---|---|---|---|
-| `argus.poll` | timer (Observation) | `trigger` (`scheduled`/`manual`), `outcome` (`completed`/`failed`) | `argus_poll_seconds_*` |
+| `argus.poll` | timer (Observation) | `trigger` (`scheduled`/`manual`), `outcome` (`completed`/`failed`/`interrupted`) | `argus_poll_seconds_*` |
 | `argus.fetch.retry` | counter | `source` | `argus_fetch_retry_total` |
-| `argus.scheduled.job` | counter | `scheduled_job` (`poll`), `outcome` (`success`/`skipped`/`error`) | `argus_scheduled_job_total` |
+| `argus.scheduled.job` | counter | `scheduled_job` (`poll`), `outcome` (`success`/`skipped`/`error`/`interrupted`) | `argus_scheduled_job_total` |
 | `argus.feed.state` | gauge | `feed_id`, `state` (`healthy`/`failing`/`disabled`) | `argus_feed_state` |
 | `argus.feed.consecutive.failures` | gauge | `feed_id` | `argus_feed_consecutive_failures` |
 | `argus.feed.since.last.success` | gauge, base unit `seconds` | `feed_id` | `argus_feed_since_last_success_seconds` |
 | `argus.poll.last.success` | gauge, base unit `seconds` | none | `argus_poll_last_success_seconds` |
 
-`argus.fetch` keeps its existing tags and gains `outcome=not_modified`. No meter name may end in its base unit, because `MeterSpec` appends the unit.
+`argus.fetch` keeps its existing tags and gains `outcome=not_modified`. `argus.ingest` gains `outcome=not_modified` too (it was `failed` before the review fixes). No meter name may end in its base unit, because `MeterSpec` appends the unit.
 
 ### Dashboard additions (`grafana/dashboards/argus-observability.json`)
 
@@ -265,3 +265,32 @@ Done means:
 - JaCoCo coverage is at about 99.7%, with no new exclusions.
 - The owner's branch scan shows 0 Sonar issues.
 - Commits are on `feat/argus-phase-3`, and `git status` is clean apart from the owner's untracked files.
+
+## Review fixes
+
+Applied after the phase review, in one commit (`fix: address phase 3 review`). One line per fix:
+
+1. **Retries.** `RetryingFeedFetcher` builds one `RetryPolicy` from `FetchProperties.Retry` and runs each fetch in a `RetryTemplate` with a per-call `RetryListener` that counts `argus.fetch.retry{source}` before each retry. `RetryableFeedFetcher`, `RetryTelemetryListener` and `FetchProperties.DEFAULT_RETRY` are gone; `FeedFetcher` takes a single `throwOnTransient` flag. `@EnableResilientMethods` stays for `@ConcurrencyLimit`.
+2. **`PATCH`.** One atomic `UPDATE feed SET enabled, updated_at` through `JdbcClient`; 0 rows is 404. Health columns are never rewritten. The response is a re-read of the feed.
+3. **`argus.ingest` outcome.** A 304 is `outcome=not_modified`, not `failed`.
+4. **Graceful shutdown.** On interrupt the poller cancels its futures, stops submitting and ends with `PollInterruptedException` (outcome `interrupted`, INFO log, 503 for a manual refresh-all). An interrupted feed writes no health. The executor interrupts its workers on close and waits at most 10s.
+5. **Conditional GET behind redirects.** The stored validators go out on every hop.
+6. **`DELETE`.** One set-based `DELETE ... USING article_feed` for the feed's own articles, then the feed.
+7. **Gauge refresh.** `ReentrantLock` instead of `synchronized`; `refreshAfterCommit()` after the transaction commits; a refresh failure is a WARN and never replaces the API result.
+8. **Dashboard.** Feed-health table joined on `feed_id` with threshold colours and a `never` mapping; stalest feeds put never-succeeded feeds first; last-poll-age shows `never` until the first poll; descriptions corrected.
+9. **`FeedLoader` result types.** `loadForCreate` returns its own sealed `CreateLoaded`; the `Timer.Sample` lives in a create-fetch timer handle; switches are exhaustive.
+10. **304 without validators.** `Failed(HTTP_STATUS, 304)`.
+11. **Unexpected loader exceptions.** `recordFailure(..., "unexpected_error")` (unless interrupted), then rethrow.
+12. **Feed deleted mid-poll.** WARN without a stack trace, report reason `feed_deleted`, no health write.
+13. **Last poll age.** Covered by 8.
+14. **Coverage and exact assertions.** `IngestMetricsIT` asserts the exact retry delta; coverage is back above 99%.
+
+Tidy-ups: `FeedState` enum, `PollProperties` moved to `feed.poll`, constants for reason strings and MDC and span keys, duplicated telemetry code collapsed, `PollingTelemetry` and `FeedPollingScheduler` package-private, comments corrected.
+
+Deviations from the plan above:
+
+- **Per-feed gauge refresh after commit.** The gauges refresh after the transaction commits (`refreshAfterCommit()`), and a failing refresh is only logged, instead of being a plain synchronous call that could throw.
+- **`RetryTemplate` instead of `@Retryable`.** The retry settings are typed and validated in `FetchProperties.Retry`, and the retry counter needs no `MethodRetryEvent` listener.
+- **Stop-cleanly shutdown.** The poll is interrupted and ends as `interrupted` within the 40s Swarm grace period (30s web phase plus at most 10s executor termination), instead of being awaited.
+- **`PollInterruptedException` is an `ApiException`.** The existing handler therefore answers 503 `SERVICE_UNAVAILABLE`, and `web.error` does not depend on `feed.poll`.
+- **`FeedHealthGauges` is wired by `FeedHealthConfiguration`.** That keeps `feed.health` from depending on `feed.poll`, where `PollProperties` now lives.

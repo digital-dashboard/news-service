@@ -50,15 +50,15 @@ docker build -t argus:local .
 
 Everything is under `/news/v2`. Writes need the `X-Admin-Key` header; reads don't.
 
-Feed URLs can carry tokens, and reads are open. Without a valid admin key, every response that contains a feed URL shows it without user-info and query string (`scheme://host[:port]/path`). With a valid `X-Admin-Key`, even on a `GET`, the full URL is returned. `siteUrl` is a public site link and is always shown as stored.
+Feed URLs can carry tokens, and reads are open. Without a valid admin key, every response that contains a feed URL shows it without user-info and query string (`scheme://host[:port]/path`). With a valid `X-Admin-Key`, even on a `GET`, the full URL is returned. `siteUrl` is a public site link and is always shown as stored. The redaction strips user-info and the query string only: a token placed in the URL path is still visible, so keep tokens in the query string.
 
-- `POST /feeds`: add a feed. Body `url`, `topic` and optional `name`. Returns 201, or 400 (validation, including a URL with user-info such as `http://user:pass@host/feed`), 401 (missing or wrong key), 409 `FEED_URL_CONFLICT` (that exact URL exists) or 422 `FEED_INVALID` (the URL could not be fetched or is not a feed; `reason` says why).
+- `POST /feeds`: add a feed. Body `url`, `topic` and optional `name`. It makes a single download attempt: retries and conditional GET apply to polls and refreshes only. Returns 201, or 400 (validation, including a URL with user-info such as `http://user:pass@host/feed`), 401 (missing or wrong key), 409 `FEED_URL_CONFLICT` (that exact URL exists) or 422 `FEED_INVALID` (the URL could not be fetched or is not a feed; `reason` says why).
 - `GET /feeds?page&size`: paged list of feeds with health (`state`, `consecutiveFailures`, `lastFetchedAt`, `lastSuccessAt`, `lastError`), ordered by `id ASC`. `page` defaults to 0; `size` defaults to 20 (max 100). URLs are redacted without the admin key.
 - `GET /feeds/{id}`: one feed with health, or 404 `FEED_NOT_FOUND`. URL is redacted without the admin key.
-- `PATCH /feeds/{id}`: toggle feed enabled state. Body `{"enabled": boolean}`. Needs `X-Admin-Key`. Returns the updated feed with its current state. Takes effect on the next poll.
+- `PATCH /feeds/{id}`: toggle feed enabled state. Body `{"enabled": boolean}`. Needs `X-Admin-Key`. Returns the updated feed with its current state, and takes effect on the next poll. It changes only `enabled`, so health recorded by a concurrent fetch is never overwritten. Errors: 400 (missing or null `enabled`), 401 (missing or wrong key) or 404 `FEED_NOT_FOUND`.
 - `DELETE /feeds/{id}`: delete a feed and its orphan articles in one transaction. Articles still linked to another feed are preserved; the source row is kept. Needs `X-Admin-Key`. Returns 204 or 404 `FEED_NOT_FOUND`.
 - `POST /feeds/{id}/refresh`: fetch and ingest now, and return the ingest report. It answers 200 even when the upstream failed; the report then has `outcome=FAILED`. An unknown id is 404 `FEED_NOT_FOUND`.
-- `POST /feeds/refresh`: synchronous manual poll of all enabled feeds across virtual thread workers. Returns 200 with an `AggregatePollReport`. Needs `X-Admin-Key`. If another poll is currently running (manual or scheduled), returns 409 `POLL_IN_PROGRESS`.
+- `POST /feeds/refresh`: manual poll of all enabled feeds across virtual thread workers. The request blocks until every feed has finished; the worst case is bounded by the retry budget (`ARGUS_FETCH_RETRY_TIMEOUT` plus one read timeout) and by the concurrency. Returns 200 with an `AggregatePollReport`. Needs `X-Admin-Key`. If another poll is currently running (manual or scheduled), returns 409 `POLL_IN_PROGRESS`. If shutdown interrupts the poll, returns 503 `SERVICE_UNAVAILABLE`; feeds that had finished stay stored.
 - `GET /articles?page&size`: articles, newest first. `page` is zero-based and defaults to 0; `size` is 1 to 100 and defaults to 20. A page whose offset (`page * size`) exceeds the 32-bit range is 400 `VALIDATION_FAILED`.
 
 ```bash
@@ -66,6 +66,19 @@ curl -X POST http://localhost:8080/news/v2/feeds \
   -H "X-Admin-Key: $ARGUS_ADMIN_KEY" -H 'Content-Type: application/json' \
   -d '{"url":"https://example.org/feed.xml","topic":"TECH"}'
 ```
+
+## Polling and outcomes
+
+Polls and refreshes send the stored `ETag` and `Last-Modified` on every redirect hop, so an unchanged feed answers 304 and is not parsed again. I/O errors and 5xx responses are retried with exponential backoff (`ARGUS_FETCH_RETRY_*`); 4xx responses never are. Retries and conditional GET apply to polls and refreshes only.
+
+Outcome values, as reported in the API and as metric tag values:
+
+- `argus.ingest` (one feed): `completed` (fetched, parsed and stored), `not_modified` (304, nothing parsed or stored) or `failed` (the fetch, parse or persist failed). The ingest report's `outcome` field uses the same three values in upper case.
+- `argus.fetch` (one download): `fetched`, `not_modified` or `failed`, with a `reason` tag for failures.
+- `argus.poll` (one whole run): `completed` (the run reached the end, even if some feeds failed), `failed` (the run itself threw) or `interrupted` (shutdown cut it short).
+- `argus.scheduled.job`: `success`, `skipped` (the previous poll was still running), `error` or `interrupted`.
+
+On shutdown the in-flight poll is interrupted rather than awaited; see the worst-case shutdown time in [observability/README.md](observability/README.md).
 
 ## Observability
 

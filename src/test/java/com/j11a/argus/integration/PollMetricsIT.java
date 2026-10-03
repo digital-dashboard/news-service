@@ -6,9 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.feed.poll.FeedPoller;
-import com.j11a.argus.feed.poll.FeedPollingScheduler;
+import com.j11a.argus.feed.poll.PollTestHooks;
 import com.j11a.argus.feed.poll.PollTrigger;
-import com.j11a.argus.feed.poll.PollingTelemetry;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.observability.MeterSpec;
 import com.j11a.argus.observability.MetricCatalogue;
@@ -21,6 +20,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 
 class PollMetricsIT extends AbstractIntegrationTest {
 
@@ -47,10 +47,7 @@ class PollMetricsIT extends AbstractIntegrationTest {
     private FeedPoller poller;
 
     @Autowired
-    private FeedPollingScheduler scheduler;
-
-    @Autowired
-    private PollingTelemetry pollingTelemetry;
+    private ApplicationContext context;
 
     @Autowired
     private FeedIngestService ingestService;
@@ -67,9 +64,10 @@ class PollMetricsIT extends AbstractIntegrationTest {
 
         poller.poll(PollTrigger.MANUAL);
 
-        scheduler.runScheduledPoll();
-        pollingTelemetry.recordScheduledJobSkipped();
-        pollingTelemetry.recordScheduledJobError();
+        PollTestHooks.runScheduledPoll(context);
+        PollTestHooks.recordScheduledJob(context, "skipped");
+        PollTestHooks.recordScheduledJob(context, "error");
+        PollTestHooks.recordScheduledJob(context, "interrupted");
     }
 
     @Test

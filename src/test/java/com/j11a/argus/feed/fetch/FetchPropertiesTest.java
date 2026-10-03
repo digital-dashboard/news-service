@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
+import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -11,6 +12,9 @@ import org.springframework.boot.context.properties.source.MapConfigurationProper
 import org.springframework.util.unit.DataSize;
 
 class FetchPropertiesTest {
+
+    private static final FetchProperties.Retry RETRY =
+            new FetchProperties.Retry(2, Duration.ofSeconds(1), 2.0, Duration.ofSeconds(25));
 
     private static final Validator VALIDATOR = Validation.buildDefaultValidatorFactory().getValidator();
 
@@ -27,9 +31,9 @@ class FetchPropertiesTest {
         assertThat(properties.maxBodySize()).isEqualTo(DataSize.ofMegabytes(5));
         assertThat(properties.maxRedirects()).isEqualTo(5);
         assertThat(properties.retry().maxRetries()).isEqualTo(2);
-        assertThat(properties.retry().delay()).isEqualTo(java.time.Duration.ofSeconds(1));
+        assertThat(properties.retry().delay()).isEqualTo(Duration.ofSeconds(1));
         assertThat(properties.retry().multiplier()).isEqualTo(2.0);
-        assertThat(properties.retry().timeout()).isEqualTo(java.time.Duration.ofSeconds(25));
+        assertThat(properties.retry().timeout()).isEqualTo(Duration.ofSeconds(25));
     }
 
     @Test
@@ -42,27 +46,27 @@ class FetchPropertiesTest {
                 "argus.fetch.retry.timeout", "10s"));
 
         assertThat(properties.retry().maxRetries()).isEqualTo(4);
-        assertThat(properties.retry().delay()).isEqualTo(java.time.Duration.ofMillis(500));
+        assertThat(properties.retry().delay()).isEqualTo(Duration.ofMillis(500));
         assertThat(properties.retry().multiplier()).isEqualTo(1.5);
-        assertThat(properties.retry().timeout()).isEqualTo(java.time.Duration.ofSeconds(10));
+        assertThat(properties.retry().timeout()).isEqualTo(Duration.ofSeconds(10));
     }
 
     @Test
     void acceptsValidProperties() {
-        assertThat(VALIDATOR.validate(new FetchProperties("Argus/1", DataSize.ofMegabytes(1), 10, FetchProperties.DEFAULT_RETRY))).isEmpty();
-        assertThat(VALIDATOR.validate(new FetchProperties("Argus/1", DataSize.ofBytes(1), 0, FetchProperties.DEFAULT_RETRY))).isEmpty();
+        assertThat(VALIDATOR.validate(new FetchProperties("Argus/1", DataSize.ofMegabytes(1), 10, RETRY))).isEmpty();
+        assertThat(VALIDATOR.validate(new FetchProperties("Argus/1", DataSize.ofBytes(1), 0, RETRY))).isEmpty();
     }
 
     @Test
     void aMissingBodySizeFailsOnlyTheNotNullConstraint() {
-        assertThat(VALIDATOR.validate(new FetchProperties("a", null, 5, FetchProperties.DEFAULT_RETRY)))
+        assertThat(VALIDATOR.validate(new FetchProperties("a", null, 5, RETRY)))
                 .singleElement()
                 .satisfies(violation -> assertThat(violation.getPropertyPath()).hasToString("maxBodySize"));
     }
 
     @Test
     void aNegativeBodySizeIsRejectedWithTheBodySizeMessage() {
-        assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofBytes(-1), 5, FetchProperties.DEFAULT_RETRY)))
+        assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofBytes(-1), 5, RETRY)))
                 .singleElement()
                 .satisfies(violation -> assertThat(violation.getMessage())
                         .isEqualTo("argus.fetch.max-body-size must be positive"));
@@ -70,23 +74,23 @@ class FetchPropertiesTest {
 
     @Test
     void rejectsBlankUserAgentNonPositiveSizeAndOutOfRangeRedirects() {
-        assertThat(VALIDATOR.validate(new FetchProperties(" ", DataSize.ofMegabytes(1), 5, FetchProperties.DEFAULT_RETRY))).hasSize(1);
-        assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofBytes(0), 5, FetchProperties.DEFAULT_RETRY))).hasSize(1);
-        assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofMegabytes(1), -1, FetchProperties.DEFAULT_RETRY))).hasSize(1);
-        assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofMegabytes(1), 11, FetchProperties.DEFAULT_RETRY))).hasSize(1);
+        assertThat(VALIDATOR.validate(new FetchProperties(" ", DataSize.ofMegabytes(1), 5, RETRY))).hasSize(1);
+        assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofBytes(0), 5, RETRY))).hasSize(1);
+        assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofMegabytes(1), -1, RETRY))).hasSize(1);
+        assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofMegabytes(1), 11, RETRY))).hasSize(1);
     }
 
     @Test
     void rejectsInvalidRetryProperties() {
         assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofMegabytes(1), 5,
-                new FetchProperties.Retry(-1, java.time.Duration.ofSeconds(1), 2.0, java.time.Duration.ofSeconds(25))))).hasSize(1);
+                new FetchProperties.Retry(-1, Duration.ofSeconds(1), 2.0, Duration.ofSeconds(25))))).hasSize(1);
         assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofMegabytes(1), 5,
-                new FetchProperties.Retry(11, java.time.Duration.ofSeconds(1), 2.0, java.time.Duration.ofSeconds(25))))).hasSize(1);
+                new FetchProperties.Retry(11, Duration.ofSeconds(1), 2.0, Duration.ofSeconds(25))))).hasSize(1);
         assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofMegabytes(1), 5,
-                new FetchProperties.Retry(2, null, 2.0, java.time.Duration.ofSeconds(25))))).hasSize(1);
+                new FetchProperties.Retry(2, null, 2.0, Duration.ofSeconds(25))))).hasSize(1);
         assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofMegabytes(1), 5,
-                new FetchProperties.Retry(2, java.time.Duration.ofSeconds(1), 0.5, java.time.Duration.ofSeconds(25))))).hasSize(1);
+                new FetchProperties.Retry(2, Duration.ofSeconds(1), 0.5, Duration.ofSeconds(25))))).hasSize(1);
         assertThat(VALIDATOR.validate(new FetchProperties("a", DataSize.ofMegabytes(1), 5,
-                new FetchProperties.Retry(2, java.time.Duration.ofSeconds(1), 2.0, null)))).hasSize(1);
+                new FetchProperties.Retry(2, Duration.ofSeconds(1), 2.0, null)))).hasSize(1);
     }
 }

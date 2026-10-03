@@ -3,8 +3,12 @@ package com.j11a.argus.feed.poll;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.qos.logback.classic.Level;
 import com.j11a.argus.observability.MetricNames;
+import com.j11a.argus.testsupport.LogCapture;
 import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.observation.DefaultMeterObservationHandler;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
 import java.time.Clock;
@@ -56,22 +60,41 @@ class PollingTelemetryTest {
         assertThat(gauge.value()).isNaN();
     }
 
+    private double jobCount(String outcome) {
+        return registry.find(MetricNames.SCHEDULED_JOB)
+                .tag(MetricNames.Tags.OUTCOME, outcome)
+                .counter().count();
+    }
+
     @Test
-    void scheduledJobCountersIncrementCorrectly() {
-        telemetry.recordScheduledJobSuccess();
-        telemetry.recordScheduledJobSkipped();
-        telemetry.recordScheduledJobError();
+    void recordScheduledJobCountsEachOutcomeSeparately() {
+        telemetry.recordScheduledJob("success");
+        telemetry.recordScheduledJob("skipped");
+        telemetry.recordScheduledJob("error");
+        telemetry.recordScheduledJob("interrupted");
+        telemetry.recordScheduledJob("interrupted");
 
-        assertThat(registry.find(MetricNames.SCHEDULED_JOB)
-                .tag(MetricNames.Tags.OUTCOME, "success")
-                .counter().count()).isEqualTo(1.0);
+        assertThat(jobCount("success")).isEqualTo(1.0);
+        assertThat(jobCount("skipped")).isEqualTo(1.0);
+        assertThat(jobCount("error")).isEqualTo(1.0);
+        assertThat(jobCount("interrupted")).isEqualTo(2.0);
+    }
 
-        assertThat(registry.find(MetricNames.SCHEDULED_JOB)
-                .tag(MetricNames.Tags.OUTCOME, "skipped")
-                .counter().count()).isEqualTo(1.0);
+    @Test
+    void anInterruptedPollIsTimedAsInterruptedAndLoggedAtInfoOnly() {
+        observations.observationConfig().observationHandler(new DefaultMeterObservationHandler(registry));
+        try (LogCapture logs = LogCapture.start()) {
+            assertThatThrownBy(() -> telemetry.poll("p3", PollTrigger.SCHEDULED, () -> {
+                throw new PollInterruptedException(new InterruptedException());
+            })).isInstanceOf(PollInterruptedException.class);
 
-        assertThat(registry.find(MetricNames.SCHEDULED_JOB)
-                .tag(MetricNames.Tags.OUTCOME, "error")
-                .counter().count()).isEqualTo(1.0);
+            assertThat(logs.at(Level.ERROR)).isEmpty();
+            assertThat(logs.messagesAt(Level.INFO)).containsExactly("Poll scheduled interrupted by shutdown");
+        }
+
+        Timer timer = registry.find(MetricNames.POLL).tag(MetricNames.Tags.OUTCOME, "interrupted").timer();
+        assertThat(timer).isNotNull();
+        assertThat(timer.count()).isEqualTo(1);
+        assertThat(registry.find(MetricNames.POLL_LAST_SUCCESS).gauge().value()).isNaN();
     }
 }

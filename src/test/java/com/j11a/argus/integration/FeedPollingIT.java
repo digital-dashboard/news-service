@@ -1,6 +1,7 @@
 package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -11,7 +12,7 @@ import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.feed.poll.AggregatePollReport;
 import com.j11a.argus.feed.poll.FeedPoller;
-import com.j11a.argus.feed.poll.FeedPollingScheduler;
+import com.j11a.argus.feed.poll.PollTestHooks;
 import com.j11a.argus.feed.poll.PollTrigger;
 import com.j11a.argus.testsupport.AdminKeys;
 import com.j11a.argus.testsupport.FeedStubServer;
@@ -29,6 +30,7 @@ import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.context.ApplicationContext;
 import org.springframework.http.MediaType;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -46,7 +48,7 @@ class FeedPollingIT extends AbstractIntegrationTest {
     private FeedPoller poller;
 
     @Autowired
-    private FeedPollingScheduler scheduler;
+    private ApplicationContext context;
 
     @Autowired
     private MeterRegistry meterRegistry;
@@ -91,7 +93,7 @@ class FeedPollingIT extends AbstractIntegrationTest {
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.code").value("POLL_IN_PROGRESS"));
 
-            scheduler.runScheduledPoll();
+            PollTestHooks.runScheduledPoll(context);
             assertThat(currentSkippedCount()).isEqualTo(skippedBefore + 1.0);
         } finally {
             releaseLatch.countDown();
@@ -192,6 +194,35 @@ class FeedPollingIT extends AbstractIntegrationTest {
         assertThat(summaryLine.path("pollId").asString()).isEqualTo(report.pollId());
 
         assertThat(MDC.get("pollId")).isNull();
+    }
+
+    @Test
+    void aFeedDeletedWhileItIsBeingFetchedFailsCleanlyWithoutHealthWritesOrErrorLogs(CapturedOutput output)
+            throws Exception {
+        CountDownLatch enterLatch = new CountDownLatch(1);
+        CountDownLatch releaseLatch = new CountDownLatch(1);
+        String path = "/deleted-mid-poll/feed.xml";
+        FeedResponse feed = createFeedFrom(path, "bbc-like-rss2.xml", Topic.WORLD);
+        stub.serveWithLatch(path, enterLatch, releaseLatch, "bbc-like-rss2.xml");
+
+        CompletableFuture<AggregatePollReport> backgroundPoll = CompletableFuture.supplyAsync(
+                () -> poller.poll(PollTrigger.MANUAL));
+        assertThat(enterLatch.await(5, TimeUnit.SECONDS)).isTrue();
+
+        try {
+            mockMvc.perform(delete(FEEDS + "/" + feed.id()).header(AdminKeys.HEADER, AdminKeys.VALID))
+                    .andExpect(status().isNoContent());
+        } finally {
+            releaseLatch.countDown();
+        }
+
+        AggregatePollReport report = backgroundPoll.get(10, TimeUnit.SECONDS);
+        assertThat(report.failed()).isOne();
+        assertThat(report.reports().getFirst().failureReason()).isEqualTo("feed_deleted");
+        assertThat(jdbcClient.sql("SELECT count(*) FROM feed").query(Long.class).single()).isZero();
+        assertThat(jdbcClient.sql("SELECT count(*) FROM article").query(Long.class).single()).isZero();
+        assertThat(output.getOut()).doesNotContain("\"level\":\"ERROR\"");
+        assertThat(output.getOut()).contains("was deleted during the poll");
     }
 
     private double currentSkippedCount() {

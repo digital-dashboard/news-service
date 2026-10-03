@@ -5,4 +5,8 @@ import org.jspecify.annotations.Nullable;
 public record FetchValidators(@Nullable String etag, @Nullable String lastModified) {
 
     public static final FetchValidators EMPTY = new FetchValidators(null, null);
+
+    public boolean isEmpty() {
+        return etag == null && lastModified == null;
+    }
 }

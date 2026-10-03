@@ -11,11 +11,13 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 
 /** Loopback HTTP server that stands in for a feed host; records every request it receives. */
@@ -34,8 +36,8 @@ public final class FeedStubServer implements AutoCloseable {
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
     private final Map<String, Responder> responders = new ConcurrentHashMap<>();
     private final List<Request> requests = new CopyOnWriteArrayList<>();
-    private final java.util.concurrent.atomic.AtomicInteger inFlight = new java.util.concurrent.atomic.AtomicInteger();
-    private final java.util.concurrent.atomic.AtomicInteger peakInFlight = new java.util.concurrent.atomic.AtomicInteger();
+    private final AtomicInteger inFlight = new AtomicInteger();
+    private final AtomicInteger peakInFlight = new AtomicInteger();
 
     public int peakInFlight() {
         return peakInFlight.get();
@@ -102,8 +104,8 @@ public final class FeedStubServer implements AutoCloseable {
         return this;
     }
 
-    public FeedStubServer serveWithLatch(String path, java.util.concurrent.CountDownLatch enterLatch,
-            java.util.concurrent.CountDownLatch releaseLatch, String fixtureName) {
+    public FeedStubServer serveWithLatch(String path, CountDownLatch enterLatch,
+            CountDownLatch releaseLatch, String fixtureName) {
         byte[] body = Fixtures.feed(fixtureName);
         responders.put(path, exchange -> {
             enterLatch.countDown();

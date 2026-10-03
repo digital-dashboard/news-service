@@ -97,16 +97,8 @@ public class Feed {
         return topic;
     }
 
-    public @Nullable String getLanguage() {
-        return language;
-    }
-
     public boolean isEnabled() {
         return enabled;
-    }
-
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
     }
 
     public @Nullable String getEtag() {
@@ -135,13 +127,5 @@ public class Feed {
 
     public Instant getCreatedAt() {
         return createdAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(Instant updatedAt) {
-        this.updatedAt = updatedAt;
     }
 }

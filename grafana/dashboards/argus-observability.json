@@ -1,7 +1,7 @@
 {
   "uid": "argus-observability",
   "title": "Argus \u2014 Observability",
-  "description": "Argus service health: HTTP RED metrics, the ingestion pipeline, data quality, JVM, PostgreSQL and HikariCP, container resources, Tempo traces and Loki logs. Version-controlled in grafana/dashboards and validated by the Argus dashboard tests.",
+  "description": "Argus service health: HTTP RED metrics, scheduled polling, per-feed health, the ingestion pipeline, data quality, JVM, PostgreSQL and HikariCP, container resources, Tempo traces and Loki logs. Version-controlled in grafana/dashboards and validated by the Argus dashboard tests.",
   "tags": [
     "argus",
     "artemis",
@@ -77,7 +77,7 @@
       {
         "name": "source",
         "label": "Source",
-        "description": "Filters the ingestion panels by feed source.",
+        "description": "Filters the ingestion, fetch retry and 304 ratio panels by feed source.",
         "type": "query",
         "datasource": {
           "type": "prometheus",
@@ -451,7 +451,7 @@
       "id": 40,
       "type": "stat",
       "title": "Last poll age",
-      "description": "Seconds since the last successful feed poll across all enabled feeds. Shows never if no poll has succeeded yet.",
+      "description": "Seconds since the last completed poll, even if some feeds failed in it. Shows never until the first poll after a restart. Orange from 15 minutes and red from 30 minutes mean the schedule has stopped running.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -469,7 +469,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "time() - max(argus_poll_last_success_seconds{job=\"argus\"})",
+          "expr": "time() - (max(argus_poll_last_success_seconds{job=\"argus\"}) > 0)",
           "editorMode": "code",
           "range": false,
           "instant": true,
@@ -762,7 +762,7 @@
       "id": 45,
       "type": "timeseries",
       "title": "Poll outcomes",
-      "description": "Rate of completed and failed feed polling executions per second by trigger.",
+      "description": "Polling runs per second by trigger and outcome. completed: the poll ran to the end, even if some feeds failed in it (see Feed health). failed: the poll itself threw, for example the feed list could not be read. interrupted: shutdown cut the poll short; feeds that had finished stay stored.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -876,7 +876,7 @@
       "id": 47,
       "type": "timeseries",
       "title": "304 ratio",
-      "description": "Proportion of HTTP fetch requests returning 304 Not Modified, saving network bandwidth and compute.",
+      "description": "Share of fetches that ended in 304 Not Modified, meaning the feed had not changed since the stored validators were sent. Low values on feeds that publish rarely mean the validators are not being honoured. Filtered by the source variable.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -946,7 +946,7 @@
       "id": 49,
       "type": "table",
       "title": "Feed health",
-      "description": "Per-feed operational state, consecutive failures, and duration since last success. Click a row to view its logs in Loki.",
+      "description": "One row per feed: state, consecutive failures and time since the last successful fetch (including 304). Failures are orange from 1 and red from 3, the default failing threshold. Since last success is orange from 1 hour and red from 6 hours; never means the feed has not succeeded since it was added. Click a row for its logs in Loki.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -964,7 +964,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "argus_feed_state{job=\"argus\"} == 1",
+          "expr": "sum by (feed_id, state) (argus_feed_state{job=\"argus\"} == 1)",
           "editorMode": "code",
           "range": false,
           "instant": true,
@@ -976,7 +976,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "argus_feed_consecutive_failures{job=\"argus\"}",
+          "expr": "max by (feed_id) (argus_feed_consecutive_failures{job=\"argus\"})",
           "editorMode": "code",
           "range": false,
           "instant": true,
@@ -988,7 +988,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "argus_feed_since_last_success_seconds{job=\"argus\"}",
+          "expr": "max by (feed_id) (argus_feed_since_last_success_seconds{job=\"argus\"})",
           "editorMode": "code",
           "range": false,
           "instant": true,
@@ -1002,17 +1002,188 @@
               "title": "Logs for feed ${__data.fields.feed_id}",
               "url": "/explore?left=%7B%22datasource%22:%22${DS_LOKI}%22,%22queries%22:%5B%7B%22expr%22:%22%7Bservice=%5C%22argus%5C%22%7D%20%7C%20json%20%7C%20feedId=%5C%22${__data.fields.feed_id}%5C%22%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
             }
-          ]
+          ],
+          "custom": {
+            "align": "auto"
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "State"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "healthy": {
+                        "text": "healthy",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "failing": {
+                        "text": "failing",
+                        "color": "red",
+                        "index": 1
+                      },
+                      "disabled": {
+                        "text": "disabled",
+                        "color": "text",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Failures"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 3
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Since last success"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "never",
+                        "color": "red",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 3600
+                    },
+                    {
+                      "color": "red",
+                      "value": 21600
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          }
+        ]
       },
-      "options": {}
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Failures",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "feed_id",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Value #A": true
+            },
+            "indexByName": {
+              "feed_id": 0,
+              "state": 1,
+              "Value #B": 2,
+              "Value #C": 3
+            },
+            "renameByName": {
+              "feed_id": "Feed",
+              "state": "State",
+              "Value #B": "Failures",
+              "Value #C": "Since last success"
+            }
+          }
+        }
+      ]
     },
     {
       "id": 50,
-      "type": "timeseries",
+      "type": "bargauge",
       "title": "Stalest feeds",
-      "description": "Feeds with the longest elapsed time in seconds since their last successful ingest.",
+      "description": "The five feeds with the longest time since their last successful fetch (including 304). A feed that has never succeeded reports -1, which would sort last, so the query lifts it to a sentinel value that sorts first and shows as never. The bar is full from one day.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1030,39 +1201,66 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "topk(5, argus_feed_since_last_success_seconds{job=\"argus\"})",
+          "expr": "topk(5, ((argus_feed_since_last_success_seconds{job=\"argus\"} == -1) * 0 + 1e12) or argus_feed_since_last_success_seconds{job=\"argus\"})",
           "editorMode": "code",
-          "range": true,
-          "instant": false,
+          "range": false,
+          "instant": true,
           "legendFormat": "feed {{feed_id}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
           },
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "spanNulls": false
-          },
-          "unit": "s"
+          "min": 0,
+          "max": 86400,
+          "unit": "s",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1000000000000": {
+                  "text": "never",
+                  "color": "red",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3600
+              },
+              {
+                "color": "red",
+                "value": 21600
+              }
+            ]
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": []
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "namePlacement": "auto",
+        "valueMode": "color"
       }
     },
     {
@@ -1511,7 +1709,7 @@
       "id": 52,
       "type": "timeseries",
       "title": "Job runs by outcome",
-      "description": "Count of scheduled job runs by job name and outcome (success, skipped, or error).",
+      "description": "Scheduled poll runs by outcome. success: the poll completed. skipped: the previous poll was still running. error: the poll failed unexpectedly, so look at the logs. interrupted: shutdown cut the run short, which is expected during a deploy. A flat line means the schedule has stopped.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"

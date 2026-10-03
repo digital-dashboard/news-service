@@ -50,36 +50,53 @@ public class FeedIngestService {
     public IngestReport refresh(long feedId) {
         Feed feed = feeds.findWithSourceById(feedId)
                 .orElseThrow(() -> new ApiException(ErrorCode.FEED_NOT_FOUND, "Feed " + feedId + " does not exist."));
-        return ingest(feed, () -> {
-            FetchValidators validators = new FetchValidators(feed.getEtag(), feed.getLastModified());
-            Instant now = clock.instant();
-            FeedLoader.Loaded loaded = loader.load(URI.create(feed.getUrl()), validators, feed.getSource().getKey());
-            return switch (loaded) {
-                case FeedLoader.Loaded.Parsed(var parsedFeed, var fetchedAt, var newValidators) -> {
-                    try {
-                        IngestReport rep = persist(feed, parsedFeed, fetchedAt);
-                        healthUpdater.recordSuccess(feed.getId(), newValidators, now);
-                        yield rep;
-                    } catch (RuntimeException e) {
-                        healthUpdater.recordFailure(feed.getId(), "persist_failed", now);
-                        throw e;
-                    }
-                }
-                case FeedLoader.Loaded.NotModified notModified -> {
-                    healthUpdater.recordNotModified(feed.getId(), notModified.notModified().validators(), now);
-                    yield IngestReport.notModified(feed.getId());
-                }
-                case FeedLoader.Loaded.Failed failed -> {
-                    healthUpdater.recordFailure(feed.getId(), failed.lastError(), now);
-                    yield IngestReport.failed(feed.getId(), failed.reason());
-                }
-                case FeedLoader.Loaded.CreateParsed createParsed -> {
-                    IngestReport rep = persist(feed, createParsed.feed(), createParsed.fetchedAt());
-                    healthUpdater.recordSuccess(feed.getId(), createParsed.validators(), now);
-                    yield rep;
-                }
-            };
-        });
+        return ingest(feed, () -> refreshLoaded(feed));
+    }
+
+    private IngestReport refreshLoaded(Feed feed) {
+        FetchValidators validators = new FetchValidators(feed.getEtag(), feed.getLastModified());
+        Instant now = clock.instant();
+        FeedLoader.Loaded loaded;
+        try {
+            loaded = loader.load(URI.create(feed.getUrl()), validators, feed.getSource().getKey());
+        } catch (RuntimeException e) {
+            recordFailureUnlessInterrupted(feed, FailureReasons.UNEXPECTED_ERROR, now);
+            throw e;
+        }
+        if (Thread.currentThread().isInterrupted()) {
+            return IngestReport.failed(feed.getId(), FailureReasons.INTERRUPTED);
+        }
+        return switch (loaded) {
+            case FeedLoader.Loaded.Parsed(var parsedFeed, var fetchedAt, var newValidators) ->
+                    persistAndRecord(feed, parsedFeed, fetchedAt, newValidators, now);
+            case FeedLoader.Loaded.NotModified(var notModified) -> {
+                healthUpdater.recordNotModified(feed.getId(), notModified.validators(), now);
+                yield IngestReport.notModified(feed.getId());
+            }
+            case FeedLoader.Loaded.Failed failed -> {
+                healthUpdater.recordFailure(feed.getId(), failed.lastError(), now);
+                yield IngestReport.failed(feed.getId(), failed.reason());
+            }
+        };
+    }
+
+    private IngestReport persistAndRecord(Feed feed, ParsedFeed parsed, Instant fetchedAt,
+            FetchValidators validators, Instant now) {
+        try {
+            IngestReport report = persist(feed, parsed, fetchedAt);
+            healthUpdater.recordSuccess(feed.getId(), validators, now);
+            return report;
+        } catch (RuntimeException e) {
+            recordFailureUnlessInterrupted(feed, FailureReasons.PERSIST_FAILED, now);
+            throw e;
+        }
+    }
+
+    // A shutdown interrupt is not the feed's fault, so it must not count against it.
+    private void recordFailureUnlessInterrupted(Feed feed, String reason, Instant now) {
+        if (!Thread.currentThread().isInterrupted()) {
+            healthUpdater.recordFailure(feed.getId(), reason, now);
+        }
     }
 
     /** For callers that already fetched and parsed the feed: no second download. */
@@ -97,7 +114,9 @@ public class FeedIngestService {
                         report.failureReason());
                 return report;
             } finally {
-                healthGauges.refresh();
+                if (!Thread.currentThread().isInterrupted()) {
+                    healthGauges.refreshAfterCommit();
+                }
             }
         }
     }

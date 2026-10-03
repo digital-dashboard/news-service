@@ -237,13 +237,13 @@ The feed list now drives automatic ingestion:
 - Each feed records its health: last fetched, last success, last error, consecutive failures.
 - `POST /feeds/refresh` runs a poll on demand and returns 409 `POLL_IN_PROGRESS` if one is already running.
 - Feed list and detail endpoints show health. `PATCH` enables or disables a feed, and `DELETE` removes it.
-- Graceful shutdown lets an in-flight poll finish, or stops it cleanly within the shutdown timeout.
+- Graceful shutdown stops an in-flight poll cleanly within the shutdown timeout; feeds that already finished stay stored.
 - Stored articles are still served when feeds or the internet are down.
 
 Telemetry:
 - Meters:
-  - The poll timer (`trigger`, `outcome`)
-  - The fetch-retry counter, fed by Spring's `MethodRetryEvent`
+  - The poll timer (`trigger`, `outcome`: `completed`, `failed`, `interrupted`)
+  - The fetch-retry counter, incremented by a `RetryTemplate` listener before each retry
   - The scheduled-job run counter (`scheduled_job=poll`, `outcome`)
   - Feed gauges: by state, consecutive failures per feed, and seconds since last success per feed
   - The last-successful-poll timestamp
@@ -255,18 +255,18 @@ Telemetry:
   - New **Feed health** row:
     - A table per feed with state, consecutive failures and last-success age, colour-thresholded, with a link to the feed's logs in Loki.
     - A "stalest feeds" top-k panel.
-  - A **Scheduled jobs** row of silent-failure stats (job runs by outcome).
+  - A **Scheduled jobs** row of silent-failure stats (job runs by outcome: `success`, `skipped`, `error`, `interrupted`).
 
 ### Acceptance criteria
 
-- [ ] Stub-server fetcher tests cover: 200 with validators, 304, 404 (not retried), 503 (retried, then failed), timeout, oversized body, redirect followed, redirect limit, non-http scheme, and the headers sent.
-- [ ] A 304 leaves articles untouched and updates last-fetched-at.
-- [ ] A failing feed increments its failure count and records the error, while other feeds still ingest. Success resets the count.
-- [ ] A refresh-all requested during a running poll returns 409. Disabled feeds are skipped. Concurrent fetches never exceed the configured limit.
-- [ ] A feed added or disabled through the API takes effect on the next poll without a restart.
-- [ ] `GET /articles` keeps serving stored data while every feed fails.
-- [ ] A poll that throws increments the scheduled-job counter with `outcome=error` and doesn't stop later polls.
-- [ ] Deleting a feed removes its per-feed gauge series on the next refresh.
+- [x] Stub-server fetcher tests cover: 200 with validators, 304, 404 (not retried), 503 (retried, then failed), timeout, oversized body, redirect followed, redirect limit, non-http scheme, and the headers sent.
+- [x] A 304 leaves articles untouched and updates last-fetched-at.
+- [x] A failing feed increments its failure count and records the error, while other feeds still ingest. Success resets the count.
+- [x] A refresh-all requested during a running poll returns 409. Disabled feeds are skipped. Concurrent fetches never exceed the configured limit.
+- [x] A feed added or disabled through the API takes effect on the next poll without a restart.
+- [x] `GET /articles` keeps serving stored data while every feed fails.
+- [x] A poll that throws increments the scheduled-job counter with `outcome=error` and doesn't stop later polls.
+- [x] Deleting a feed removes its per-feed gauge series on the next refresh.
 - [ ] The feed-health table shows a deliberately broken feed as failing, with the right failure count.
 
 ---

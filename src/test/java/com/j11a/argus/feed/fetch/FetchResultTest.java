@@ -38,7 +38,8 @@ class FetchResultTest {
         assertThat(base)
                 .isNotEqualTo(new Fetched(new byte[] {1}, "application/rss+xml", URL, null))
                 .isNotEqualTo(new Fetched(new byte[] {1}, null, URL, null))
-                .isNotEqualTo(new Fetched(new byte[] {1}, "text/xml", URI.create("https://example.test/other"), null));
+                .isNotEqualTo(new Fetched(new byte[] {1}, "text/xml", URI.create("https://example.test/other"), null))
+                .isNotEqualTo(new Fetched(new byte[] {1}, "text/xml", URL, null, new FetchValidators("\"v1\"", null)));
     }
 
     @Test

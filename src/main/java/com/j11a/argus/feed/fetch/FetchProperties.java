@@ -21,8 +21,6 @@ public record FetchProperties(
         @Min(0) @Max(10) @DefaultValue("5") int maxRedirects,
         @Valid @NotNull @DefaultValue Retry retry) {
 
-    public static final Retry DEFAULT_RETRY = new Retry(2, Duration.ofSeconds(1), 2.0, Duration.ofSeconds(25));
-
     public record Retry(
             @Min(0) @Max(10) @DefaultValue("2") int maxRetries,
             @NotNull @DefaultValue("1s") Duration delay,

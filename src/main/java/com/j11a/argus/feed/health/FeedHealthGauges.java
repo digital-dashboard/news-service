@@ -1,6 +1,5 @@
 package com.j11a.argus.feed.health;
 
-import com.j11a.argus.config.PollProperties;
 import com.j11a.argus.observability.MetricNames;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.MultiGauge;
@@ -11,29 +10,36 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-@Component
+/**
+ * Registered as a bean by ArgusConfiguration, which supplies the failing threshold; this package must not depend on
+ * the poll package.
+ */
 public class FeedHealthGauges {
 
-    private static final String STATE_HEALTHY = "healthy";
-    private static final String STATE_FAILING = "failing";
-    private static final String STATE_DISABLED = "disabled";
+    private static final Logger LOG = LoggerFactory.getLogger(FeedHealthGauges.class);
 
+    // A lock, not synchronized: JDBC under a monitor would pin a virtual thread to its carrier.
+    private final ReentrantLock refreshLock = new ReentrantLock();
     private final JdbcClient jdbc;
-    private final PollProperties properties;
+    private final int failingThreshold;
     private final Clock clock;
     private final MultiGauge stateGauge;
     private final MultiGauge consecutiveFailuresGauge;
     private final MultiGauge sinceLastSuccessGauge;
 
-    public FeedHealthGauges(JdbcClient jdbc, PollProperties properties, Clock clock, MeterRegistry registry) {
+    public FeedHealthGauges(JdbcClient jdbc, int failingThreshold, Clock clock, MeterRegistry registry) {
         this.jdbc = jdbc;
-        this.properties = properties;
+        this.failingThreshold = failingThreshold;
         this.clock = clock;
         this.stateGauge = MultiGauge.builder(MetricNames.FEED_STATE)
                 .description("Current operational state of each feed (1 for active state)")
@@ -42,7 +48,7 @@ public class FeedHealthGauges {
                 .description("Number of consecutive fetch or ingest failures for each feed")
                 .register(registry);
         this.sinceLastSuccessGauge = MultiGauge.builder(MetricNames.FEED_SINCE_LAST_SUCCESS)
-                .description("Seconds elapsed since the last successful ingest for each feed, or -1 if never")
+                .description("Seconds elapsed since the last successful fetch (including 304 Not Modified) for each feed, or -1 if never")
                 .baseUnit("seconds")
                 .register(registry);
     }
@@ -52,28 +58,53 @@ public class FeedHealthGauges {
         refresh();
     }
 
-    public synchronized void refresh() {
-        List<FeedSnapshot> snapshots = jdbc.sql("""
+    /** Re-reads the feed rows now. A failure is logged and never reaches the caller: gauges are best effort. */
+    public void refresh() {
+        refreshLock.lock();
+        try {
+            registerRows(readSnapshots());
+        } catch (RuntimeException e) {
+            LOG.warn("Feed health gauge refresh failed; the gauges keep their previous rows", e);
+        } finally {
+            refreshLock.unlock();
+        }
+    }
+
+    /** Inside a transaction the rows are only visible after commit, so the refresh waits for it. */
+    public void refreshAfterCommit() {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            refresh();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                refresh();
+            }
+        });
+    }
+
+    private List<FeedSnapshot> readSnapshots() {
+        return jdbc.sql("""
                 SELECT id, enabled, consecutive_failures, last_success_at
                 FROM feed
                 """)
                 .query((rs, rowNum) -> {
-                    long id = rs.getLong("id");
-                    boolean enabled = rs.getBoolean("enabled");
-                    int consecutiveFailures = rs.getInt("consecutive_failures");
                     OffsetDateTime lastSuccess = rs.getObject("last_success_at", OffsetDateTime.class);
-                    return new FeedSnapshot(id, enabled, consecutiveFailures,
-                            lastSuccess != null ? lastSuccess.toInstant() : null);
+                    return new FeedSnapshot(rs.getLong("id"), rs.getBoolean("enabled"),
+                            rs.getInt("consecutive_failures"), lastSuccess != null ? lastSuccess.toInstant() : null);
                 })
                 .list();
+    }
 
+    private void registerRows(List<FeedSnapshot> snapshots) {
         List<MultiGauge.Row<?>> stateRows = new ArrayList<>(snapshots.size());
         List<MultiGauge.Row<?>> consecutiveRows = new ArrayList<>(snapshots.size());
         List<MultiGauge.Row<?>> sinceLastSuccessRows = new ArrayList<>(snapshots.size());
 
         for (FeedSnapshot snapshot : snapshots) {
             String feedIdStr = String.valueOf(snapshot.id());
-            String state = resolveState(snapshot);
+            String state = FeedState.of(snapshot.enabled(), snapshot.consecutiveFailures(), failingThreshold).tag();
 
             stateRows.add(MultiGauge.Row.of(
                     Tags.of(MetricNames.Tags.FEED_ID, feedIdStr, MetricNames.Tags.STATE, state),
@@ -92,16 +123,6 @@ public class FeedHealthGauges {
         stateGauge.register(stateRows, true);
         consecutiveFailuresGauge.register(consecutiveRows, true);
         sinceLastSuccessGauge.register(sinceLastSuccessRows, true);
-    }
-
-    private String resolveState(FeedSnapshot snapshot) {
-        if (!snapshot.enabled()) {
-            return STATE_DISABLED;
-        }
-        if (snapshot.consecutiveFailures() >= properties.failingThreshold()) {
-            return STATE_FAILING;
-        }
-        return STATE_HEALTHY;
     }
 
     private record FeedSnapshot(long id, boolean enabled, int consecutiveFailures, @Nullable Instant lastSuccessAt) {

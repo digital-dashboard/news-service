@@ -1,4 +1,4 @@
-package com.j11a.argus.config;
+package com.j11a.argus.feed.poll;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;

@@ -4,8 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -19,13 +23,15 @@ import com.j11a.argus.feed.fetch.FetchValidators;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
 import com.j11a.argus.feed.parse.ParsedFeed;
+import com.j11a.argus.feed.poll.PollProperties;
+import com.j11a.argus.ingest.FailureReasons;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.FeedLoader;
+import com.j11a.argus.ingest.IngestTelemetry;
 import com.j11a.argus.source.Source;
 import com.j11a.argus.source.SourceService;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
-import io.micrometer.core.instrument.Timer;
 import java.net.URI;
 import java.time.Clock;
 import java.time.Instant;
@@ -35,6 +41,10 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 class FeedServiceTest {
 
@@ -48,10 +58,9 @@ class FeedServiceTest {
     private final FeedIngestService ingest = mock(FeedIngestService.class);
     private final FeedHealthUpdater healthUpdater = mock(FeedHealthUpdater.class);
     private final FeedHealthGauges healthGauges = mock(FeedHealthGauges.class);
-    private final com.j11a.argus.config.PollProperties properties =
-            new com.j11a.argus.config.PollProperties("0 */15 * * * *", 8, 3);
-    private final org.springframework.jdbc.core.simple.JdbcClient jdbc =
-            mock(org.springframework.jdbc.core.simple.JdbcClient.class);
+    private final PollProperties properties = new PollProperties("0 */15 * * * *", 8, 3);
+    private final JdbcClient jdbc = mock(JdbcClient.class);
+    private final IngestTelemetry.CreateFetchTimer timer = mock(IngestTelemetry.CreateFetchTimer.class);
     private final Clock clock = Clock.fixed(FETCHED_AT, ZoneOffset.UTC);
     private final FeedService service = new FeedService(feeds, inserter, sources, loader, ingest,
             healthUpdater, healthGauges, properties, jdbc, clock);
@@ -63,12 +72,13 @@ class FeedServiceTest {
         when(source.getKey()).thenReturn("example.test");
         when(sources.findOrCreate(anyString(), any())).thenReturn(source);
         when(inserter.findIdByUrl(URL)).thenReturn(Optional.empty());
+        when(loader.startCreateFetch()).thenReturn(timer);
     }
 
     private void loads(String title, String language) {
         ParsedFeed parsed = new ParsedFeed(title, "https://example.test/", null, language, List.of());
-        when(loader.loadForCreate(any(URI.class))).thenReturn(
-                new FeedLoader.Loaded.CreateParsed(parsed, FETCHED_AT, FetchValidators.EMPTY, 100, mock(Timer.Sample.class)));
+        when(loader.loadForCreate(any(URI.class), eq(timer))).thenReturn(
+                new FeedLoader.CreateLoaded.Created(parsed, FETCHED_AT, FetchValidators.EMPTY, 100));
     }
 
     private static Feed storedFeed() {
@@ -122,7 +132,8 @@ class FeedServiceTest {
         assertThat(inserted.getValue().name()).hasSize(FeedService.MAX_NAME_LENGTH);
         assertThat(inserted.getValue().language()).isNull();
         verify(healthUpdater).recordSuccess(9L, FetchValidators.EMPTY, FETCHED_AT);
-        verify(healthGauges).refresh();
+        verify(healthGauges).refreshAfterCommit();
+        verify(timer).completed("example.test", 100);
     }
 
     @Test
@@ -163,7 +174,7 @@ class FeedServiceTest {
 
     @Test
     void aFeedThatCannotBeReadIsRejectedWithTheLoaderReason() {
-        when(loader.loadForCreate(any(URI.class))).thenReturn(new FeedLoader.Loaded.Failed("not_a_feed"));
+        when(loader.loadForCreate(any(URI.class), eq(timer))).thenReturn(new FeedLoader.CreateLoaded.Failed("not_a_feed"));
 
         assertThatThrownBy(() -> service.create(request()))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
@@ -183,8 +194,8 @@ class FeedServiceTest {
         FeedResponse response = service.create(request());
 
         assertThat(response.id()).isEqualTo(9L);
-        verify(healthUpdater).recordFailure(9L, "first_ingest_failed", FETCHED_AT);
-        verify(healthGauges).refresh();
+        verify(healthUpdater).recordFailure(9L, FailureReasons.FIRST_INGEST_FAILED, FETCHED_AT);
+        verify(healthGauges).refreshAfterCommit();
     }
 
     @Test
@@ -236,69 +247,61 @@ class FeedServiceTest {
     @Test
     void listReturnsPagedFeedResponses() {
         Feed stored = storedFeed();
-        when(feeds.findAll(any(org.springframework.data.domain.Pageable.class)))
-                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(stored)));
+        when(feeds.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(stored)));
 
-        org.springframework.data.domain.Page<FeedResponse> page = service.list(0, 20);
+        Page<FeedResponse> page = service.list(0, 20);
 
         assertThat(page.getContent()).hasSize(1);
         assertThat(page.getContent().getFirst().id()).isEqualTo(9L);
     }
 
+    private JdbcClient.StatementSpec statementUpdating(int rows) {
+        JdbcClient.StatementSpec spec = mock(JdbcClient.StatementSpec.class, RETURNS_SELF);
+        when(spec.update()).thenReturn(rows);
+        when(jdbc.sql(anyString())).thenReturn(spec);
+        return spec;
+    }
+
     @Test
-    void patchUpdatesEnabledStateAndRefreshesGauges() {
+    void patchUpdatesEnabledStateWithOneStatementAndRefreshesGaugesAfterCommit() {
+        JdbcClient.StatementSpec update = statementUpdating(1);
         Feed stored = storedFeed();
         when(feeds.findWithSourceById(9L)).thenReturn(Optional.of(stored));
-        when(feeds.save(stored)).thenReturn(stored);
 
         FeedResponse response = service.patch(9L, new PatchFeedRequest(false));
 
-        verify(stored).setEnabled(false);
-        verify(feeds).save(stored);
-        verify(healthGauges).refresh();
+        verify(update).param("enabled", false);
+        verify(update).param("id", 9L);
+        verify(update).update();
+        verify(feeds, never()).save(any());
+        verify(healthGauges).refreshAfterCommit();
         assertThat(response.id()).isEqualTo(9L);
     }
 
     @Test
-    void patchOfUnknownFeedThrowsNotFound() {
-        when(feeds.findWithSourceById(404L)).thenReturn(Optional.empty());
+    void patchOfUnknownFeedThrowsNotFoundWithoutRefreshingGauges() {
+        statementUpdating(0);
 
         assertThatThrownBy(() -> service.patch(404L, new PatchFeedRequest(false)))
                 .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.FEED_NOT_FOUND));
+        verifyNoInteractions(healthGauges);
     }
 
     @Test
-    void deleteRemovesFeedOrphanArticlesAndRefreshesGauges() {
-        Feed stored = storedFeed();
-        when(feeds.findById(9L)).thenReturn(Optional.of(stored));
-        org.springframework.jdbc.core.simple.JdbcClient.StatementSpec selectSpec =
-                mock(org.springframework.jdbc.core.simple.JdbcClient.StatementSpec.class);
-        @SuppressWarnings("unchecked")
-        org.springframework.jdbc.core.simple.JdbcClient.MappedQuerySpec<Long> querySpec =
-                mock(org.springframework.jdbc.core.simple.JdbcClient.MappedQuerySpec.class);
-        org.springframework.jdbc.core.simple.JdbcClient.StatementSpec deleteSpec =
-                mock(org.springframework.jdbc.core.simple.JdbcClient.StatementSpec.class);
-
-        when(jdbc.sql(org.mockito.ArgumentMatchers.contains("SELECT article_id"))).thenReturn(selectSpec);
-        when(selectSpec.param("feedId", 9L)).thenReturn(selectSpec);
-        when(selectSpec.query(Long.class)).thenReturn(querySpec);
-        when(querySpec.list()).thenReturn(List.of(101L));
-
-        when(jdbc.sql(org.mockito.ArgumentMatchers.contains("DELETE FROM article"))).thenReturn(deleteSpec);
-        when(deleteSpec.param(org.mockito.ArgumentMatchers.eq("ids"), any())).thenReturn(deleteSpec);
-        when(deleteSpec.update()).thenReturn(1);
+    void deleteRemovesOwnedArticlesThenTheFeedAndRefreshesGaugesAfterCommit() {
+        JdbcClient.StatementSpec statement = statementUpdating(1);
 
         service.delete(9L);
 
-        verify(feeds).delete(stored);
-        verify(feeds).flush();
-        verify(deleteSpec).update();
-        verify(healthGauges).refresh();
+        verify(jdbc).sql(contains("DELETE FROM article a USING article_feed mine"));
+        verify(jdbc).sql("DELETE FROM feed WHERE id = :id");
+        verify(statement).param("feedId", 9L);
+        verify(healthGauges).refreshAfterCommit();
     }
 
     @Test
-    void deleteOfUnknownFeedThrowsNotFound() {
-        when(feeds.findById(404L)).thenReturn(Optional.empty());
+    void deleteOfUnknownFeedThrowsNotFoundWithoutRefreshingGauges() {
+        statementUpdating(0);
 
         assertThatThrownBy(() -> service.delete(404L))
                 .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.FEED_NOT_FOUND));

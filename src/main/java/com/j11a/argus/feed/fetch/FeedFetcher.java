@@ -78,20 +78,20 @@ public class FeedFetcher {
     }
 
     public FetchResult fetch(URI url, FetchValidators validators) {
-        return doFetch(url, validators, null, false);
+        return doFetch(url, validators, false);
     }
 
-    public FetchResult fetchRetryable(URI url, FetchValidators validators, String sourceKey) {
-        return doFetch(url, validators, sourceKey, true);
+    /** Throws RetryableFetchException on 5xx and transient I/O, for a RetryTemplate to catch. */
+    public FetchResult fetchRetryable(URI url, FetchValidators validators) {
+        return doFetch(url, validators, true);
     }
 
-    private FetchResult doFetch(URI url, FetchValidators validators, @Nullable String sourceKey, boolean retryable) {
+    private FetchResult doFetch(URI url, FetchValidators validators, boolean throwOnTransient) {
         URI current = url;
         URI permanentTarget = null;
         boolean permanentChain = true;
         for (int redirects = 0; ; redirects++) {
-            FetchValidators hopValidators = (redirects == 0) ? validators : FetchValidators.EMPTY;
-            Step step = attempt(current, hopValidators, sourceKey, retryable);
+            Step step = attempt(current, validators, throwOnTransient);
             if (step instanceof Rejected(var rejection)) {
                 return rejection;
             }
@@ -114,16 +114,17 @@ public class FeedFetcher {
         }
     }
 
-    private Step attempt(URI current, FetchValidators validators, @Nullable String sourceKey, boolean retryable) {
+    private Step attempt(URI current, FetchValidators validators, boolean throwOnTransient) {
         if (!HttpUrls.isHttp(current) || HttpUrls.hasUserInfo(current)) {
             return new Rejected(new Failed(FetchFailureReason.INVALID_URL, null));
         }
         try {
-            return request(current, validators, sourceKey, retryable);
+            return request(current, validators, throwOnTransient);
         } catch (RestClientException e) {
+            // classify only ever answers TIMEOUT or IO, and both are transient.
             FetchFailureReason reason = classify(e);
-            if (retryable && sourceKey != null && (reason == FetchFailureReason.TIMEOUT || reason == FetchFailureReason.IO)) {
-                throw new RetryableFetchException(reason, null, sourceKey);
+            if (throwOnTransient) {
+                throw new RetryableFetchException(reason, null);
             }
             return new Rejected(new Failed(reason, null));
         }
@@ -141,13 +142,13 @@ public class FeedFetcher {
                 .orElseGet(() -> new Stop(new Failed(FetchFailureReason.INVALID_URL, null)));
     }
 
-    private Step request(URI url, FetchValidators validators, @Nullable String sourceKey, boolean retryable) {
+    private Step request(URI url, FetchValidators validators, boolean throwOnTransient) {
         return client.get()
                 .uri(url)
                 .header(HttpHeaders.USER_AGENT, properties.userAgent())
                 .header(HttpHeaders.ACCEPT, ACCEPT)
                 .headers(headers -> applyValidators(headers, validators))
-                .exchange((request, response) -> handle(response, sourceKey, retryable), true);
+                .exchange((request, response) -> handle(response, validators, throwOnTransient), true);
     }
 
     private static void applyValidators(HttpHeaders headers, FetchValidators validators) {
@@ -159,10 +160,14 @@ public class FeedFetcher {
         }
     }
 
-    private Step handle(ClientHttpResponse response, @Nullable String sourceKey, boolean retryable) throws IOException {
+    private Step handle(ClientHttpResponse response, FetchValidators sent, boolean throwOnTransient)
+            throws IOException {
         HttpStatusCode status = response.getStatusCode();
         int code = status.value();
         if (code == 304) {
+            if (sent.isEmpty()) {
+                return new Rejected(new Failed(FetchFailureReason.HTTP_STATUS, code));
+            }
             String etag = response.getHeaders().getFirst(HttpHeaders.ETAG);
             String lastModified = response.getHeaders().getFirst(HttpHeaders.LAST_MODIFIED);
             return new NotModifiedStep(new FetchValidators(etag, lastModified));
@@ -170,9 +175,9 @@ public class FeedFetcher {
         if (REDIRECT_STATUSES.contains(code)) {
             return new Redirect(code, response.getHeaders().getFirst(HttpHeaders.LOCATION));
         }
-        if (code >= 500 && code < 600) {
-            if (retryable && sourceKey != null) {
-                throw new RetryableFetchException(FetchFailureReason.HTTP_STATUS, code, sourceKey);
+        if (status.is5xxServerError()) {
+            if (throwOnTransient) {
+                throw new RetryableFetchException(FetchFailureReason.HTTP_STATUS, code);
             }
             return new Rejected(new Failed(FetchFailureReason.HTTP_STATUS, code));
         }

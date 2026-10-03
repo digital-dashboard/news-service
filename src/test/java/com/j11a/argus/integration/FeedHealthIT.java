@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
-import com.j11a.argus.feed.fetch.FetchValidators;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
 import com.j11a.argus.ingest.FeedIngestService;
@@ -14,7 +13,9 @@ import com.j11a.argus.observability.MetricNames;
 import com.j11a.argus.testsupport.FeedStubServer;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.time.Instant;
+import java.util.Date;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -61,8 +62,13 @@ class FeedHealthIT extends AbstractIntegrationTest {
         // Next request returns 304
         stub.serve(PATH, 304, null, new byte[0], Map.of("ETag", "\"v1\""));
 
+        Timer notModifiedIngests = meterRegistry.find(MetricNames.INGEST).tag("outcome", "not_modified").timer();
+        long notModifiedBefore = notModifiedIngests == null ? 0 : notModifiedIngests.count();
+
         IngestReport report = ingestService.refresh(feedId);
         assertThat(report.outcome()).isEqualTo(IngestReport.Outcome.NOT_MODIFIED);
+        assertThat(meterRegistry.find(MetricNames.INGEST).tag("outcome", "not_modified").timer().count())
+                .isEqualTo(notModifiedBefore + 1);
 
         long articleCountAfter = jdbcClient.sql("SELECT count(*) FROM article").query(Long.class).single();
         assertThat(articleCountAfter).isEqualTo(articleCountBefore);
@@ -71,8 +77,8 @@ class FeedHealthIT extends AbstractIntegrationTest {
                 .param("id", feedId).query().singleRow();
         assertThat(updatedRow.get("consecutive_failures")).isEqualTo(0);
         assertThat(updatedRow.get("last_error")).isNull();
-        java.util.Date lastFetched = (java.util.Date) updatedRow.get("last_fetched_at");
-        java.util.Date initialFetched = (java.util.Date) initialRow.get("last_fetched_at");
+        Date lastFetched = (Date) updatedRow.get("last_fetched_at");
+        Date initialFetched = (Date) initialRow.get("last_fetched_at");
         assertThat(lastFetched).isAfterOrEqualTo(initialFetched);
     }
 
@@ -178,5 +184,33 @@ class FeedHealthIT extends AbstractIntegrationTest {
         assertThat(meterRegistry.find(MetricNames.FEED_STATE).tag("feed_id", feedIdStr).gauge()).isNull();
         assertThat(meterRegistry.find(MetricNames.FEED_CONSECUTIVE_FAILURES).tag("feed_id", feedIdStr).gauge()).isNull();
         assertThat(meterRegistry.find(MetricNames.FEED_SINCE_LAST_SUCCESS).tag("feed_id", feedIdStr).gauge()).isNull();
+    }
+
+    @Test
+    void aFeedThatNeverSucceededReportsMinusOneSecondsSinceLastSuccess() {
+        stub.serve(PATH, 200, "application/rss+xml",
+                FeedStubServer.utf8("<rss><channel><title>H</title><link>https://health.example.test</link></channel></rss>"));
+        long feedId = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS)).id();
+        jdbcClient.sql("UPDATE feed SET last_success_at = NULL WHERE id = :id").param("id", feedId).update();
+
+        healthGauges.refresh();
+
+        Gauge sinceSuccess = meterRegistry.find(MetricNames.FEED_SINCE_LAST_SUCCESS)
+                .tag("feed_id", String.valueOf(feedId)).gauge();
+        assertThat(sinceSuccess).isNotNull();
+        assertThat(sinceSuccess.value()).isEqualTo(-1.0);
+    }
+
+    @Test
+    void aLongFailureReasonIsCappedAtTheColumnLimit() {
+        stub.serve(PATH, 200, "application/rss+xml",
+                FeedStubServer.utf8("<rss><channel><title>H</title><link>https://health.example.test</link></channel></rss>"));
+        long feedId = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS)).id();
+
+        healthUpdater.recordFailure(feedId, "x".repeat(500), Instant.now());
+
+        String lastError = jdbcClient.sql("SELECT last_error FROM feed WHERE id = :id")
+                .param("id", feedId).query(String.class).single();
+        assertThat(lastError).hasSize(128);
     }
 }

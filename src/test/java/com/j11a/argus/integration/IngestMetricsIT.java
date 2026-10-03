@@ -1,6 +1,7 @@
 package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.api.CreateFeedRequest;
@@ -9,6 +10,7 @@ import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.observability.MeterSpec;
 import com.j11a.argus.observability.MetricCatalogue;
 import com.j11a.argus.observability.MetricNames;
+import com.j11a.argus.web.error.ApiException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Meter;
@@ -23,6 +25,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 class IngestMetricsIT extends AbstractIntegrationTest {
 
     private static final String PATH = "/metrics/sparse.xml";
+    /** argus.fetch.retry.max-retries, which the it profile leaves at its default of 2. */
+    private static final int MAX_RETRIES = 2;
     /** The create path tags the fetch with the key resolved from the feed URL's host. */
     private static final String URL_SOURCE = "127.0.0.1";
     /** The entries are tagged with the stored source, which comes from the feed's site link. */
@@ -96,9 +100,9 @@ class IngestMetricsIT extends AbstractIntegrationTest {
         stub.serve("/missing-create.xml", 404, "text/plain", new byte[0]);
         long unknownBefore = timerCount(MetricNames.FETCH, "source", "unknown", "outcome", "failed", "reason", "http_status");
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+        assertThatThrownBy(() ->
                 feedService.create(new CreateFeedRequest(stub.baseUrl() + "/missing-create.xml", null, Topic.TECH)))
-                .isInstanceOf(com.j11a.argus.web.error.ApiException.class);
+                .isInstanceOf(ApiException.class);
 
         assertThat(timerCount(MetricNames.FETCH, "source", "unknown", "outcome", "failed", "reason", "http_status"))
                 .isEqualTo(unknownBefore + 1);
@@ -132,8 +136,7 @@ class IngestMetricsIT extends AbstractIntegrationTest {
                 .isEqualTo(before + 1);
         assertThat(timerCount(MetricNames.INGEST, "source", SITE_SOURCE, "outcome", "failed"))
                 .isEqualTo(failedIngestBefore + 1);
-        assertThat(counter(MetricNames.FETCH_RETRY, "source", SITE_SOURCE))
-                .isGreaterThanOrEqualTo(retriesBefore + 1);
+        assertThat(counter(MetricNames.FETCH_RETRY, "source", SITE_SOURCE)).isEqualTo(retriesBefore + MAX_RETRIES);
     }
 
     @Test

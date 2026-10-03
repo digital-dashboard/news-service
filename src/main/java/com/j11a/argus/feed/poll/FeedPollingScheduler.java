@@ -7,29 +7,32 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
-public class FeedPollingScheduler {
+class FeedPollingScheduler {
 
     private static final Logger LOG = LoggerFactory.getLogger(FeedPollingScheduler.class);
 
     private final FeedPoller poller;
     private final PollingTelemetry telemetry;
 
-    public FeedPollingScheduler(FeedPoller poller, PollingTelemetry telemetry) {
+    FeedPollingScheduler(FeedPoller poller, PollingTelemetry telemetry) {
         this.poller = poller;
         this.telemetry = telemetry;
     }
 
     @Scheduled(cron = "${argus.poll.cron}")
-    public void runScheduledPoll() {
+    void runScheduledPoll() {
         try {
             poller.poll(PollTrigger.SCHEDULED);
-            telemetry.recordScheduledJobSuccess();
+            telemetry.recordScheduledJob(PollingTelemetry.JOB_SUCCESS);
         } catch (InvocationRejectedException e) {
             LOG.warn("Scheduled poll skipped: another poll is already in progress");
-            telemetry.recordScheduledJobSkipped();
-        } catch (Exception e) {
+            telemetry.recordScheduledJob(PollingTelemetry.JOB_SKIPPED);
+        } catch (PollInterruptedException e) {
+            LOG.info("Scheduled poll interrupted by shutdown");
+            telemetry.recordScheduledJob(PollingTelemetry.OUTCOME_INTERRUPTED);
+        } catch (RuntimeException e) {
             LOG.error("Scheduled poll error", e);
-            telemetry.recordScheduledJobError();
+            telemetry.recordScheduledJob(PollingTelemetry.JOB_ERROR);
         }
     }
 }

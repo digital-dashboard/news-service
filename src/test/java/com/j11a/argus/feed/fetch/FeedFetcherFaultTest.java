@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.ClientHttpRequestFactory;
@@ -19,11 +20,14 @@ import org.springframework.web.client.RestClient;
 /** Faults a loopback server cannot produce deterministically, injected through the request factory. */
 class FeedFetcherFaultTest {
 
+    private static final FetchProperties.Retry RETRY =
+            new FetchProperties.Retry(2, Duration.ofSeconds(1), 2.0, Duration.ofSeconds(25));
+
     private static final URI FEED = URI.create("https://feeds.example.test/rss.xml");
 
     private static FetchResult fetchThrough(ClientHttpRequestFactory factory) {
         FeedFetcher fetcher = new FeedFetcher(RestClient.builder().requestFactory(factory),
-                new FetchProperties("Argus-Test/1.0", DataSize.ofKilobytes(1), 5, FetchProperties.DEFAULT_RETRY));
+                new FetchProperties("Argus-Test/1.0", DataSize.ofKilobytes(1), 5, RETRY));
         return fetcher.fetch(FEED);
     }
 

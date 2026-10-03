@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.resilience.InvocationRejectedException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -82,6 +83,6 @@ public class ProbeController {
 
     @GetMapping("/rejected")
     public String rejected() {
-        throw new org.springframework.resilience.InvocationRejectedException("limit reached", this);
+        throw new InvocationRejectedException("limit reached", this);
     }
 }

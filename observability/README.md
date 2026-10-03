@@ -48,12 +48,12 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 
 ## What the rows answer
 
-- **Overview:** is the service up, how long has it run, are requests failing or slow, age of the last successful feed poll, counts of enabled and failing feeds, and total articles inserted in the last 24h.
-- **Polling:** duration of feed polling runs (p95 and max by trigger), completed vs failed poll outcomes, transient HTTP fetch retries by source, and the ratio of 304 Not Modified responses.
-- **Feed health:** per-feed operational state, consecutive failures, and duration since last success, with links to Loki logs, and the stalest feeds.
+- **Overview:** is the service up, how long has it run, are requests failing or slow, age of the last completed poll (`never` until the first poll after a restart), counts of enabled and failing feeds, and total articles inserted in the last 24h.
+- **Polling:** duration of feed polling runs (p95 and max by trigger), poll outcomes (`completed`: the run reached the end even if some feeds failed; `failed`: the run itself threw; `interrupted`: shutdown cut it short), transient HTTP fetch retries by source, and the share of fetches that ended in 304 Not Modified. The `source` variable filters the retries and the 304 ratio.
+- **Feed health:** one table row per feed with its state, consecutive failures and time since the last successful fetch (including 304), with a link to the feed's Loki logs. Failures are orange from 1 and red from 3; time since last success is orange from 1 hour and red from 6 hours, and `never` means the feed has not succeeded since it was added. **Stalest feeds** lists the five longest-stale feeds; a feed that never succeeded is lifted above all others and shows as `never`.
 - **Ingestion pipeline:** are feed fetches succeeding and how fast (outcomes by reason, fetch and ingest p95 per source), how large the downloads are, and what happened to each entry (inserted, unchanged, skipped). The `source` variable filters these panels.
 - **Data quality:** how often parsed entries lack a field (date, GUID, image, author), as a rate and as a share of all entries seen, so a feed that stops providing a field stands out.
-- **Scheduled jobs:** background scheduled job runs broken down by outcome (`success`, `skipped`, `error`).
+- **Scheduled jobs:** scheduled poll runs by outcome: `success` (the poll completed), `skipped` (the previous poll was still running), `error` (the poll failed unexpectedly) or `interrupted` (shutdown cut it short, expected during a deploy).
 - **API & HTTP, JVM & runtime, PostgreSQL & HikariCP, Container:** request rate, latency and status; heap, GC, threads and CPU; pool and database health; container CPU and memory.
 - **Traces, Logs:** slow and errored traces from Tempo, and the live Loki log stream.
 
@@ -115,3 +115,15 @@ Phase 3 additions, after the dashboard is imported:
 - [ ] A deliberately broken feed shows as failing in the feed-health table, with the right failure count.
 - [ ] A refresh-all (`POST /news/v2/feeds/refresh`) during a running poll returns 409.
 - [ ] The 304 ratio rises on the second poll as unchanged feeds return Not Modified.
+- [ ] Right after a restart the last-poll-age stat shows `never` until the first poll completes; that is expected, not a fault.
+- [ ] During a deploy the poll outcome and job-run panels show `interrupted`, never `error`.
+
+## Shutdown time
+
+Swarm stops the container after 40 seconds. Argus fits inside that:
+
+- `server.shutdown: graceful` with `spring.lifecycle.timeout-per-shutdown-phase: 30s`: in-flight HTTP requests get up to 30 seconds. Only a manual `POST /feeds/refresh` can use all of it.
+- Boot's `spring.task.scheduling.shutdown.await-termination` is `false` (its default, also set explicitly in `application.yml`), so closing the scheduler interrupts a running scheduled poll instead of waiting for it. The poll cancels its outstanding feeds, stops submitting new ones and ends with the `interrupted` outcome.
+- The poll executor then interrupts any worker that is still running and waits at most 10 seconds (`taskTerminationTimeout`) for the workers to leave.
+
+Worst case: 30 seconds of graceful HTTP phase plus 10 seconds of executor termination is 40 seconds, so a worker that ignores its interrupt is the only way to reach the Swarm limit. A scheduled poll alone shuts down in well under 12 seconds, and normally in milliseconds. Feeds that had finished before the interrupt stay stored, and an interrupted feed's failure count is not increased.
