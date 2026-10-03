@@ -7,19 +7,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
+import com.j11a.argus.feed.FeedInserter;
+import com.j11a.argus.feed.NewFeed;
 import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.feed.api.FeedService;
 import com.j11a.argus.feed.api.PatchFeedRequest;
+import com.j11a.argus.feed.identity.FeedRedirectApplier;
 import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.source.PatchSourceRequest;
+import com.j11a.argus.source.SourceMerger;
 import com.j11a.argus.source.SourceService;
 import com.j11a.argus.testsupport.AdminKeys;
 import com.j11a.argus.testsupport.FeedStubServer;
 import com.j11a.argus.testsupport.Fixtures;
 import com.j11a.argus.testsupport.LogCapture;
+import com.j11a.argus.testsupport.MergeData;
 import com.j11a.argus.web.error.ApiException;
+import java.net.URI;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -33,9 +40,27 @@ class AuditLoggingIT extends AbstractIntegrationTest {
 
     private static final String PATH = "/audit/feed.xml";
     private static final String TOKEN_QUERY = "?token=SECRET-TOKEN";
+    private static final String SECRET = "SECRET-TOKEN";
+    private static final String REDIRECT_KEY = "redirect.example.test";
+    private static final String MERGED_KEY = "bbci.co.uk";
+    private static final String TARGET_KEY = "bbc.co.uk";
+    private static final String OLD_URL = "http://redirect.example.test/old";
+    private static final String NEW_URL = "https://redirect.example.test/new";
+    private static final String HELD_URL = "https://redirect.example.test/held";
+    private static final String GUID = "g1";
+    private static final Instant FETCHED = Instant.parse("2026-10-01T08:00:00Z");
 
     @Autowired
     private SourceService sourceService;
+
+    @Autowired
+    private SourceMerger merger;
+
+    @Autowired
+    private FeedRedirectApplier redirectApplier;
+
+    @Autowired
+    private FeedInserter inserter;
 
     private static List<ILoggingEvent> from(LogCapture logs, Level level, Class<?> logger) {
         return logs.at(level, logger);
@@ -73,7 +98,7 @@ class AuditLoggingIT extends AbstractIntegrationTest {
                         .contains("topic WORLD")
                         .contains("from " + stub.baseUrl() + PATH);
             });
-            logs.assertNothingLogged("SECRET-TOKEN");
+            logs.assertNothingLogged(SECRET);
         }
     }
 
@@ -92,7 +117,7 @@ class AuditLoggingIT extends AbstractIntegrationTest {
                             .containsEntry("errorType", "FeedParseException")
                             .containsKey("errorMessage")
                             .containsEntry("contentType", "text/html"));
-            logs.assertNothingLogged("SECRET-TOKEN");
+            logs.assertNothingLogged(SECRET);
         }
     }
 
@@ -223,7 +248,7 @@ class AuditLoggingIT extends AbstractIntegrationTest {
                         .containsKey("sourceKey");
                 assertThat(event.getFormattedMessage()).contains("updated").contains("name=Renamed");
             });
-            logs.assertNothingLogged("SECRET-TOKEN");
+            logs.assertNothingLogged(SECRET);
         }
     }
 
@@ -240,6 +265,107 @@ class AuditLoggingIT extends AbstractIntegrationTest {
                     assertThat(LogCapture.keyValues(event))
                             .containsEntry("changedFields", List.of("country"))
                             .doesNotContainKeys(LogKeys.NEW_NAME, LogKeys.NEW_HOMEPAGE));
+        }
+    }
+
+    private long insertFeed(String sourceKey, String url) {
+        long sourceId = sourceService.findOrCreate(sourceKey, null).getId();
+        return inserter.insert(new NewFeed(sourceId, "F", url, null, null, Topic.TECH, null)).orElseThrow();
+    }
+
+    @Test
+    void aSourceMergeLogsAnInfoWithBothSourceIdsAndTheCounts() {
+        MergeData data = new MergeData(jdbcClient);
+        long source = data.source(MERGED_KEY, null);
+        long target = data.source(TARGET_KEY, null);
+        data.feed(source, "https://bbci.co.uk/feed" + TOKEN_QUERY);
+        data.article(source, GUID, null, FETCHED);
+
+        try (LogCapture logs = LogCapture.start()) {
+            merger.merge(source, target);
+
+            assertThat(from(logs, Level.INFO, SourceMerger.class)).singleElement().satisfies(event -> {
+                assertThat(LogCapture.keyValues(event))
+                        .containsEntry(LogKeys.SOURCE_ID, source)
+                        .containsEntry(LogKeys.SOURCE_KEY, MERGED_KEY)
+                        .containsEntry(LogKeys.TARGET_SOURCE_ID, target)
+                        .containsEntry(LogKeys.FEEDS_MOVED, 1)
+                        .containsEntry(LogKeys.ARTICLES_MOVED, 1)
+                        .containsEntry(LogKeys.ARTICLES_COLLAPSED, 0)
+                        .containsEntry(LogKeys.LINKS_FOLDED, 0);
+                assertThat(event.getFormattedMessage()).contains("Source " + source).contains("merged into " + target);
+            });
+            logs.assertNothingLogged(SECRET);
+        }
+    }
+
+    @Test
+    void aFeedMoveLogsAnInfoWithTheFeedBothSourcesAndTheCounts() {
+        MergeData data = new MergeData(jdbcClient);
+        long source = data.source(MERGED_KEY, null);
+        long target = data.source(TARGET_KEY, null);
+        long feed = data.feed(source, "https://bbci.co.uk/feed" + TOKEN_QUERY);
+        long article = data.article(source, GUID, null, FETCHED);
+        data.link(article, feed, FETCHED, "h");
+
+        try (LogCapture logs = LogCapture.start()) {
+            merger.moveFeed(feed, target);
+
+            assertThat(from(logs, Level.INFO, SourceMerger.class)).singleElement().satisfies(event -> {
+                assertThat(LogCapture.keyValues(event))
+                        .containsEntry(LogKeys.FEED_ID, feed)
+                        .containsEntry(LogKeys.SOURCE_ID, source)
+                        .containsEntry(LogKeys.TARGET_SOURCE_ID, target)
+                        .containsEntry(LogKeys.ARTICLES_MOVED, 1)
+                        .containsEntry(LogKeys.ARTICLES_COPIED, 0)
+                        .containsEntry(LogKeys.ARTICLES_COLLAPSED, 0)
+                        .containsEntry(LogKeys.SOURCE_DELETED, true);
+                assertThat(event.getFormattedMessage()).contains("Feed " + feed + " moved from source " + source);
+            });
+            logs.assertNothingLogged(SECRET);
+        }
+    }
+
+    @Test
+    void anAppliedPermanentRedirectLogsAnInfoWithRedactedOldAndNewUrls() {
+        long feed = insertFeed(REDIRECT_KEY, OLD_URL + TOKEN_QUERY);
+
+        try (LogCapture logs = LogCapture.start()) {
+            redirectApplier.apply(feed, REDIRECT_KEY, OLD_URL + TOKEN_QUERY,
+                    URI.create(NEW_URL + TOKEN_QUERY));
+
+            assertThat(from(logs, Level.INFO, FeedRedirectApplier.class)).singleElement().satisfies(event -> {
+                assertThat(LogCapture.keyValues(event))
+                        .containsEntry(LogKeys.FEED_ID, feed)
+                        .containsEntry(LogKeys.SOURCE_KEY, REDIRECT_KEY)
+                        .containsEntry(LogKeys.URL, OLD_URL)
+                        .containsEntry(LogKeys.NEW_URL, NEW_URL);
+                assertThat(event.getFormattedMessage()).contains("Feed " + feed + " moved to");
+            });
+            logs.assertNothingLogged(SECRET);
+        }
+    }
+
+    @Test
+    void aRedirectOntoAnotherFeedLogsAWarnWithTheDuplicateReasonAndRedactedUrls() {
+        long holder = insertFeed(REDIRECT_KEY, HELD_URL + TOKEN_QUERY);
+        long feed = insertFeed(REDIRECT_KEY, OLD_URL);
+
+        try (LogCapture logs = LogCapture.start()) {
+            redirectApplier.apply(feed, REDIRECT_KEY, OLD_URL,
+                    URI.create(HELD_URL + TOKEN_QUERY));
+
+            assertThat(from(logs, Level.WARN, FeedRedirectApplier.class)).singleElement().satisfies(event -> {
+                assertThat(LogCapture.keyValues(event))
+                        .containsEntry(LogKeys.FEED_ID, feed)
+                        .containsEntry(LogKeys.EXISTING_FEED_ID, holder)
+                        .containsEntry(LogKeys.SOURCE_KEY, REDIRECT_KEY)
+                        .containsEntry(LogKeys.REASON, "duplicate_feed")
+                        .containsEntry(LogKeys.URL, OLD_URL)
+                        .containsEntry(LogKeys.NEW_URL, HELD_URL);
+                assertThat(event.getFormattedMessage()).contains("Feed " + feed + " disabled").contains("duplicates feed " + holder);
+            });
+            logs.assertNothingLogged(SECRET);
         }
     }
 }

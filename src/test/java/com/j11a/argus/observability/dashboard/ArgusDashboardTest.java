@@ -170,19 +170,19 @@ class ArgusDashboardTest {
     void ingestRowPanels32And33AreWidenedWithoutGap() {
         JsonNode p32 = panel(32);
         JsonNode p33 = panel(33);
-        assertThat(gridPos(p32)).isEqualTo(new GridPos(0, 44, 12, 8));
-        assertThat(gridPos(p33)).isEqualTo(new GridPos(12, 44, 12, 8));
+        assertThat(gridPos(p32)).isEqualTo(new GridPos(0, 52, 12, 8));
+        assertThat(gridPos(p33)).isEqualTo(new GridPos(12, 52, 12, 8));
     }
 
     @Test
-    void deduplicationRowContainsPanels34And53Through59InOrder() {
+    void deduplicationRowContainsItsPanelsInOrder() {
         List<Integer> panelIds = StreamSupport.stream(dashboard.path("panels").spliterator(), false)
                 .map(panel -> panel.path("id").asInt())
                 .toList();
         int rowIdx = panelIds.indexOf(53);
         assertThat(rowIdx).isGreaterThanOrEqualTo(0);
-        assertThat(panelIds.subList(rowIdx, rowIdx + 8))
-                .containsExactly(53, 34, 54, 55, 56, 57, 58, 59);
+        assertThat(panelIds.subList(rowIdx, rowIdx + 10))
+                .containsExactly(53, 34, 54, 55, 56, 57, 58, 59, 62, 63);
     }
 
     @Test
@@ -190,11 +190,11 @@ class ArgusDashboardTest {
         JsonNode row = panel(53);
         assertThat(row.path("title").asString()).isEqualTo("Deduplication");
         assertThat(row.path("type").asString()).isEqualTo("row");
-        assertThat(gridPos(row)).isEqualTo(new GridPos(0, 52, 24, 1));
+        assertThat(gridPos(row)).isEqualTo(new GridPos(0, 60, 24, 1));
 
         JsonNode p34 = panel(34);
         assertThat(p34.path("title").asString()).isEqualTo("Entry decisions");
-        assertThat(gridPos(p34)).isEqualTo(new GridPos(0, 53, 12, 8));
+        assertThat(gridPos(p34)).isEqualTo(new GridPos(0, 61, 12, 8));
         assertThat(expr(p34, 0)).isEqualTo(
                 "sum by (decision) (rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\"}[$__rate_interval]))");
         assertThat(p34.path("fieldConfig").path("defaults").path("custom").path("stacking").path("mode").asString())
@@ -202,7 +202,7 @@ class ArgusDashboardTest {
 
         JsonNode p54 = panel(54);
         assertThat(p54.path("title").asString()).isEqualTo("Skip reasons");
-        assertThat(gridPos(p54)).isEqualTo(new GridPos(12, 53, 12, 8));
+        assertThat(gridPos(p54)).isEqualTo(new GridPos(12, 61, 12, 8));
         assertThat(expr(p54, 0)).isEqualTo(
                 "sum by (reason) (rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\",decision=\"skipped\"}[$__rate_interval]))");
         assertThat(p54.path("fieldConfig").path("defaults").path("unit").asString()).isEqualTo("ops");
@@ -212,21 +212,21 @@ class ArgusDashboardTest {
     void deduplicationRowHoldsTheFallbackLockWaitAndUpdatePanels() {
         JsonNode p55 = panel(55);
         assertThat(p55.path("title").asString()).isEqualTo("Link-fallback outcomes");
-        assertThat(gridPos(p55)).isEqualTo(new GridPos(0, 61, 8, 8));
+        assertThat(gridPos(p55)).isEqualTo(new GridPos(0, 69, 8, 8));
         assertThat(expr(p55, 0)).isEqualTo(
                 "sum by (outcome) (rate(argus_ingest_link_fallback_total{job=\"argus\",source=~\"$source\"}[$__rate_interval]))");
         assertThat(p55.path("fieldConfig").path("defaults").path("unit").asString()).isEqualTo("ops");
 
         JsonNode p56 = panel(56);
         assertThat(p56.path("title").asString()).isEqualTo("Lock wait p95 by source");
-        assertThat(gridPos(p56)).isEqualTo(new GridPos(8, 61, 8, 8));
+        assertThat(gridPos(p56)).isEqualTo(new GridPos(8, 69, 8, 8));
         assertThat(expr(p56, 0)).isEqualTo(
                 "histogram_quantile(0.95, sum by (le, source) (rate(argus_ingest_lock_wait_seconds_bucket{job=\"argus\",source=~\"$source\"}[$__rate_interval])))");
         assertThat(p56.path("fieldConfig").path("defaults").path("unit").asString()).isEqualTo("s");
 
         JsonNode p57 = panel(57);
         assertThat(p57.path("title").asString()).isEqualTo("Updates by reason");
-        assertThat(gridPos(p57)).isEqualTo(new GridPos(16, 61, 8, 8));
+        assertThat(gridPos(p57)).isEqualTo(new GridPos(16, 69, 8, 8));
         assertThat(expr(p57, 0)).isEqualTo(
                 "sum by (reason) (rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\",decision=\"updated\"}[$__rate_interval]))");
         assertThat(p57.path("fieldConfig").path("defaults").path("unit").asString()).isEqualTo("ops");
@@ -236,24 +236,72 @@ class ArgusDashboardTest {
     void deduplicationRowHoldsTheDuplicatePressureAndOverlapPanels() {
         JsonNode p58 = panel(58);
         assertThat(p58.path("title").asString()).isEqualTo("Duplicate pressure");
-        assertThat(gridPos(p58)).isEqualTo(new GridPos(0, 69, 12, 8));
+        assertThat(gridPos(p58)).isEqualTo(new GridPos(0, 77, 12, 8));
         assertThat(expr(p58, 0)).isEqualTo(
                 "sum(rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\",decision=~\"linked|unchanged\"}[$__rate_interval])) / clamp_min(sum(rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\"}[$__rate_interval])), 0.000000001)");
         assertThat(p58.path("fieldConfig").path("defaults").path("unit").asString()).isEqualTo("percentunit");
 
         JsonNode p59 = panel(59);
         assertThat(p59.path("title").asString()).isEqualTo("Cross-feed overlap");
-        assertThat(gridPos(p59)).isEqualTo(new GridPos(12, 69, 12, 8));
+        assertThat(gridPos(p59)).isEqualTo(new GridPos(12, 77, 12, 8));
         assertThat(expr(p59, 0)).isEqualTo(
                 "sum(rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\",decision=\"linked\"}[$__rate_interval])) / clamp_min(sum(rate(argus_ingest_entries_total{job=\"argus\",source=~\"$source\",decision=~\"inserted|linked\"}[$__rate_interval])), 0.000000001)");
         assertThat(p59.path("fieldConfig").path("defaults").path("unit").asString()).isEqualTo("percentunit");
     }
 
     @Test
-    void dataQualityRowStartsAtY77() {
+    void feedHealthRowHoldsTheRedirectAndIdentityConflictPanels() {
+        List<Integer> panelIds = StreamSupport.stream(dashboard.path("panels").spliterator(), false)
+                .map(panel -> panel.path("id").asInt())
+                .toList();
+        int rowIdx = panelIds.indexOf(48);
+        assertThat(panelIds.subList(rowIdx, rowIdx + 5)).containsExactly(48, 49, 50, 60, 61);
+
+        JsonNode redirects = panel(60);
+        assertThat(redirects.path("title").asString()).isEqualTo("Permanent redirects by outcome");
+        assertThat(gridPos(redirects)).isEqualTo(new GridPos(0, 35, 12, 8));
+        assertThat(expr(redirects, 0)).isEqualTo(
+                "sum by (outcome) (rate(argus_feed_redirect_total{job=\"argus\"}[$__rate_interval]))");
+        assertThat(redirects.path("fieldConfig").path("defaults").path("unit").asString()).isEqualTo("ops");
+
+        JsonNode conflicts = panel(61);
+        assertThat(conflicts.path("title").asString()).isEqualTo("Identity conflicts by kind");
+        assertThat(gridPos(conflicts)).isEqualTo(new GridPos(12, 35, 12, 8));
+        assertThat(expr(conflicts, 0)).isEqualTo(
+                "sum by (kind) (rate(argus_feed_identity_conflict_total{job=\"argus\"}[$__rate_interval]))");
+    }
+
+    @Test
+    void deduplicationRowHoldsTheMergeAndCollapsedPanels() {
+        JsonNode merges = panel(62);
+        assertThat(merges.path("title").asString()).isEqualTo("Source merges: rate and p95");
+        assertThat(gridPos(merges)).isEqualTo(new GridPos(0, 85, 12, 8));
+        assertThat(expr(merges, 0)).isEqualTo(
+                "sum by (type) (rate(argus_source_merge_seconds_count{job=\"argus\"}[$__rate_interval]))");
+        assertThat(expr(merges, 1)).isEqualTo(
+                "histogram_quantile(0.95, sum by (le, type) (rate(argus_source_merge_seconds_bucket{job=\"argus\"}[$__rate_interval])))");
+
+        JsonNode collapsed = panel(63);
+        assertThat(collapsed.path("title").asString()).isEqualTo("Collapsed articles by type");
+        assertThat(gridPos(collapsed)).isEqualTo(new GridPos(12, 85, 12, 8));
+        assertThat(expr(collapsed, 0)).isEqualTo(
+                "sum by (type) (increase(argus_article_collapsed_total{job=\"argus\"}[$__rate_interval]))");
+    }
+
+    @Test
+    void panelIdsAreUnique() {
+        List<Integer> panelIds = StreamSupport.stream(dashboard.path("panels").spliterator(), false)
+                .map(panel -> panel.path("id").asInt())
+                .toList();
+
+        assertThat(panelIds).doesNotHaveDuplicates();
+    }
+
+    @Test
+    void dataQualityRowStartsAtY93() {
         JsonNode dataQuality = panel(35);
         assertThat(dataQuality.path("title").asString()).isEqualTo("Data quality");
-        assertThat(gridPos(dataQuality)).isEqualTo(new GridPos(0, 77, 24, 1));
+        assertThat(gridPos(dataQuality)).isEqualTo(new GridPos(0, 93, 24, 1));
     }
 
     @Test

@@ -9,6 +9,7 @@ import static com.j11a.argus.observability.MetricNames.Tags.SCHEDULED_JOB;
 import static com.j11a.argus.observability.MetricNames.Tags.SOURCE;
 import static com.j11a.argus.observability.MetricNames.Tags.STATE;
 import static com.j11a.argus.observability.MetricNames.Tags.TRIGGER;
+import static com.j11a.argus.observability.MetricNames.Tags.TYPE;
 
 import java.util.List;
 import java.util.Set;
@@ -30,7 +31,11 @@ public final class MetricCatalogue {
             new MeterSpec(MetricNames.FEED_SINCE_LAST_SUCCESS, MeterKind.GAUGE, "seconds", Set.of(FEED_ID)),
             new MeterSpec(MetricNames.POLL_LAST_SUCCESS, MeterKind.GAUGE, "seconds", Set.of()),
             new MeterSpec(MetricNames.INGEST_LINK_FALLBACK, MeterKind.COUNTER, null, Set.of(SOURCE, OUTCOME)),
-            new MeterSpec(MetricNames.INGEST_LOCK_WAIT, MeterKind.TIMER, null, Set.of(SOURCE)));
+            new MeterSpec(MetricNames.INGEST_LOCK_WAIT, MeterKind.TIMER, null, Set.of(SOURCE)),
+            new MeterSpec(MetricNames.FEED_REDIRECT, MeterKind.COUNTER, null, Set.of(SOURCE, OUTCOME)),
+            new MeterSpec(MetricNames.FEED_IDENTITY_CONFLICT, MeterKind.COUNTER, null, Set.of(KIND)),
+            new MeterSpec(MetricNames.SOURCE_MERGE, MeterKind.TIMER, null, Set.of(TYPE, OUTCOME)),
+            new MeterSpec(MetricNames.ARTICLE_COLLAPSED, MeterKind.COUNTER, null, Set.of(TYPE)));
 
     private static final Set<String> ALLOWED_TAGS = MetricNames.Tags.all();
 
