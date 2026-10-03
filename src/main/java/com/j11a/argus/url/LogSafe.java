@@ -14,7 +14,7 @@ public final class LogSafe {
     private static final String TRAILING_PUNCTUATION = "\"'),;:]>";
     private static final Pattern URL = Pattern.compile("(?i)https?://\\S+");
     // Tokens right after a URL whose query held a space: "?k=ab cd=SECRET" must not leave "cd=SECRET" behind.
-    private static final Pattern QUERY_REMAINDER = Pattern.compile("(?:\\s+\\S*=\\S*)+");
+    private static final Pattern QUERY_REMAINDER = Pattern.compile("\\s+\\S*=\\S*");
     // A scheme-less "user:pw@host/path?query": keeps host and path only.
     private static final Pattern BARE_USER_INFO = Pattern.compile(
             "[^\\s/@:]+:[^\\s/@]+@([\\w.-]+(?::\\d+)?(?:/[^\\s?#]*)?)(?:[?#]\\S*)?");
@@ -75,8 +75,13 @@ public final class LogSafe {
     }
 
     private static int afterQueryRemainder(String text, int from) {
-        Matcher remainder = QUERY_REMAINDER.matcher(text).region(from, text.length());
-        return remainder.lookingAt() ? remainder.end() : from;
+        // One token per match, consumed in a loop: a repeated regex group recurses and can overflow on long input.
+        Matcher remainder = QUERY_REMAINDER.matcher(text);
+        int end = from;
+        while (remainder.region(end, text.length()).lookingAt()) {
+            end = remainder.end();
+        }
+        return end;
     }
 
     private static String redactedOrPlaceholder(String url) {

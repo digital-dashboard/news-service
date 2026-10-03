@@ -240,9 +240,9 @@ public class FeedService {
                 .addKeyValue(LogKeys.URL, redacted);
         LogFields.put(event, LogKeys.EXISTING_FEED_ID, existingId.orElse(null));
         event.log();
-        Map<String, Object> properties = existingId.<Map<String, Object>>map(id -> Map.of("existingFeedId", id))
+        Map<String, Object> problemProperties = existingId.<Map<String, Object>>map(id -> Map.of("existingFeedId", id))
                 .orElse(Map.of());
-        return new ApiException(ErrorCode.FEED_URL_CONFLICT, "A feed with this URL already exists.", properties);
+        return new ApiException(ErrorCode.FEED_URL_CONFLICT, "A feed with this URL already exists.", problemProperties);
     }
 
     private static String nameFor(CreateFeedRequest request, ParsedFeed parsed, Source source) {

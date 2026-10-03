@@ -45,8 +45,11 @@ public class FeedHealthUpdater {
                 .param("etag", validators.etag())
                 .param("lastModified", validators.lastModified())
                 .param("now", timestamp)
-                .query(Integer.class)
-                .optional()
+                .query((rs, row) -> rs.getInt(1))
+                .list()
+                .stream()
+                .mapToInt(Integer::intValue)
+                .findFirst()
                 .orElse(0);
     }
 
@@ -73,8 +76,11 @@ public class FeedHealthUpdater {
                 .param("etag", validators.etag())
                 .param("lastModified", validators.lastModified())
                 .param("now", timestamp)
-                .query(Integer.class)
-                .optional()
+                .query((rs, row) -> rs.getInt(1))
+                .list()
+                .stream()
+                .mapToInt(Integer::intValue)
+                .findFirst()
                 .orElse(0);
     }
 
@@ -95,8 +101,11 @@ public class FeedHealthUpdater {
                 .param("id", feedId)
                 .param("reason", cappedReason)
                 .param("now", timestamp)
-                .query(Integer.class)
-                .optional()
+                .query((rs, row) -> rs.getInt(1))
+                .list()
+                .stream()
+                .mapToInt(Integer::intValue)
+                .findFirst()
                 .orElse(0);
     }
 }
