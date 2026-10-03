@@ -51,4 +51,11 @@ class LiquibaseBaselineIT extends AbstractIntegrationTest {
                 "SELECT count(*) FROM databasechangelog WHERE id = '09-seed-sources-and-feeds'", Integer.class);
         assertThat(runs09).isZero();
     }
+
+    @Test
+    void feedSelfUrlChangeSetRanExactlyOnceUnderTestContext() {
+        Integer runs10 = jdbc.queryForObject(
+                "SELECT count(*) FROM databasechangelog WHERE id = '10-add-feed-self-url'", Integer.class);
+        assertThat(runs10).isEqualTo(1);
+    }
 }

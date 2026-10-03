@@ -149,4 +149,48 @@ class SchemaIT extends AbstractIntegrationTest {
                 .query(String.class).single();
         assertThat(articleFeedNullable).isEqualTo("YES");
     }
+
+    @Test
+    void feedSelfUrlColumnIsNullableAndBackedByAUniqueIndex() {
+        String nullable = jdbcClient.sql("""
+                        SELECT is_nullable FROM information_schema.columns
+                        WHERE table_name = 'feed' AND column_name = 'self_url'""")
+                .query(String.class).single();
+        assertThat(nullable).isEqualTo("YES");
+
+        Boolean unique = jdbcClient.sql("""
+                        SELECT i.indisunique FROM pg_index i
+                        JOIN pg_class c ON c.oid = i.indexrelid
+                        WHERE c.relname = 'uq_feed_self_url'""")
+                .query(Boolean.class).single();
+        assertThat(unique).isTrue();
+    }
+
+    @Test
+    void feedsWithoutASelfUrlDoNotCollide() {
+        long source = insertSource("example.test");
+
+        insertFeed(source, "https://example.test/a");
+        insertFeed(source, "https://example.test/b");
+
+        assertThat(jdbcClient.sql("SELECT count(*) FROM feed WHERE self_url IS NULL").query(Long.class).single())
+                .isEqualTo(2);
+    }
+
+    @Test
+    void feedSelfUrlIsUniqueWhenPresent() {
+        long source = insertSource("example.test");
+        long first = insertFeed(source, "https://example.test/a");
+        long second = insertFeed(source, "https://example.test/b");
+        setSelfUrl(first, "https://example.test/self");
+
+        assertThatThrownBy(() -> setSelfUrl(second, "https://example.test/self"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("uq_feed_self_url");
+    }
+
+    private void setSelfUrl(long feedId, String selfUrl) {
+        jdbcClient.sql("UPDATE feed SET self_url = :self WHERE id = :id")
+                .param("self", selfUrl).param("id", feedId).update();
+    }
 }

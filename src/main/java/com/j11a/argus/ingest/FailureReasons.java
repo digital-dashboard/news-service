@@ -8,6 +8,8 @@ public final class FailureReasons {
     public static final String FIRST_INGEST_FAILED = "first_ingest_failed";
     public static final String FEED_DELETED = "feed_deleted";
     public static final String INTERRUPTED = "interrupted";
+    public static final String DUPLICATE_FEED = "duplicate_feed";
+    public static final String SOURCE_CHANGED = "source_changed";
 
     private FailureReasons() {
     }

@@ -36,6 +36,9 @@ public class Feed {
     @Column(name = "site_url")
     private @Nullable String siteUrl;
 
+    @Column(name = "self_url", updatable = false)
+    private @Nullable String selfUrl;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Topic topic;
@@ -91,6 +94,10 @@ public class Feed {
 
     public @Nullable String getSiteUrl() {
         return siteUrl;
+    }
+
+    public @Nullable String getSelfUrl() {
+        return selfUrl;
     }
 
     public Topic getTopic() {

@@ -20,6 +20,10 @@ public final class MetricNames {
     public static final String SCHEDULED_JOB = "argus.scheduled.job";
     public static final String INGEST_LINK_FALLBACK = "argus.ingest.link.fallback";
     public static final String INGEST_LOCK_WAIT = "argus.ingest.lock.wait";
+    public static final String FEED_REDIRECT = "argus.feed.redirect";
+    public static final String FEED_IDENTITY_CONFLICT = "argus.feed.identity.conflict";
+    public static final String SOURCE_MERGE = "argus.source.merge";
+    public static final String ARTICLE_COLLAPSED = "argus.article.collapsed";
 
     private MetricNames() {
     }

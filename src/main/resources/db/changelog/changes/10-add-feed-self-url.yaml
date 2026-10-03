@@ -1,0 +1,25 @@
+databaseChangeLog:
+  - changeSet:
+      id: 10-add-feed-self-url
+      author: argus
+      changes:
+        - addColumn:
+            tableName: feed
+            columns:
+              - column:
+                  name: self_url
+                  type: text
+        - createIndex:
+            tableName: feed
+            indexName: uq_feed_self_url
+            unique: true
+            columns:
+              - column:
+                  name: self_url
+      rollback:
+        - dropIndex:
+            tableName: feed
+            indexName: uq_feed_self_url
+        - dropColumn:
+            tableName: feed
+            columnName: self_url

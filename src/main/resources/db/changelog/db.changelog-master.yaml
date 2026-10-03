@@ -17,3 +17,5 @@ databaseChangeLog:
       file: classpath:db/changelog/changes/08-rekey-articles.yaml
   - include:
       file: classpath:db/changelog/changes/09-seed-sources-and-feeds.yaml
+  - include:
+      file: classpath:db/changelog/changes/10-add-feed-self-url.yaml

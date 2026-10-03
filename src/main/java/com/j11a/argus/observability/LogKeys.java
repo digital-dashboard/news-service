@@ -36,6 +36,15 @@ public final class LogKeys {
     public static final String CONCURRENCY = "concurrency";
     public static final String ENABLED_FEEDS = "enabledFeeds";
     public static final String FAILING_FEEDS = "failingFeeds";
+    public static final String TARGET_SOURCE_ID = "targetSourceId";
+    public static final String FEEDS_MOVED = "feedsMoved";
+    public static final String ARTICLES_MOVED = "articlesMoved";
+    public static final String ARTICLES_COPIED = "articlesCopied";
+    public static final String ARTICLES_COLLAPSED = "articlesCollapsed";
+    public static final String LINKS_FOLDED = "linksFolded";
+    public static final String SOURCE_DELETED = "sourceDeleted";
+    public static final String NEW_URL = "newUrl";
+    public static final String KIND = "kind";
 
     private LogKeys() {
     }
