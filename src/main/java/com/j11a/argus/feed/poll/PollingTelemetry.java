@@ -1,5 +1,6 @@
 package com.j11a.argus.feed.poll;
 
+import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.observability.MetricNames;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -7,17 +8,17 @@ import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
+@Slf4j
 @Component
 class PollingTelemetry {
 
-    private static final Logger LOG = LoggerFactory.getLogger(PollingTelemetry.class);
     private static final String POLL_JOB = "poll";
     private static final String POLL_ID_MDC_KEY = "pollId";
     private static final String POLL_ID_SPAN_KEY = "poll.id";
@@ -54,13 +55,21 @@ class PollingTelemetry {
             AggregatePollReport report = work.get();
             outcome = OUTCOME_COMPLETED;
             lastSuccess.set(clock.instant());
-            LOG.info("Poll {} completed: duration={}ms feeds={} succeeded={} not_modified={} failed={} inserted={}",
-                    report.trigger().tag(), report.durationMs(), report.feedsPolled(),
-                    report.succeeded(), report.notModified(), report.failed(), report.inserted());
+            List<Long> failedFeedIds = report.failedFeedIds();
+            log.atInfo()
+                    .setMessage("Poll " + report.trigger().tag() + " completed: duration=" + report.durationMs()
+                            + "ms feeds=" + report.feedsPolled() + " succeeded=" + report.succeeded()
+                            + " not_modified=" + report.notModified() + " failed=" + report.failed()
+                            + " inserted=" + report.inserted() + " failedFeedIds=" + failedFeedIds)
+                    .addKeyValue(LogKeys.DURATION_MS, report.durationMs())
+                    .addKeyValue(LogKeys.FEEDS_POLLED, report.feedsPolled())
+                    .addKeyValue(LogKeys.FAILED, report.failed())
+                    .addKeyValue(LogKeys.FAILED_FEED_IDS, failedFeedIds)
+                    .log();
             return report;
         } catch (PollInterruptedException e) {
             outcome = OUTCOME_INTERRUPTED;
-            LOG.info("Poll {} interrupted by shutdown", trigger.tag());
+            log.info("Poll {} interrupted by shutdown", trigger.tag());
             throw e;
         } catch (RuntimeException e) {
             observation.error(e);

@@ -20,6 +20,13 @@ public record AggregatePollReport(
         int skipped,
         List<IngestReport> reports) {
 
+    public List<Long> failedFeedIds() {
+        return reports.stream()
+                .filter(report -> report.outcome() == IngestReport.Outcome.FAILED)
+                .map(IngestReport::feedId)
+                .toList();
+    }
+
     public static AggregatePollReport of(
             String pollId, PollTrigger trigger, Duration duration, List<IngestReport> reports) {
         int entriesSeen = 0;

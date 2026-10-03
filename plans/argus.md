@@ -83,7 +83,7 @@ Durable decisions that apply across all phases:
     - Spans: a root span per poll; per-feed ingest with fetch, parse, resolve and persist children; HTTP server and `RestClient` spans; backfill; retention; merge.
     - Feed and source ids are span attributes.
   - **Logs**:
-    - Structured console logs in the Logstash JSON format (`@timestamp`, `level`, `logger_name`, `message`, `traceId`, `spanId`, plus MDC keys `pollId`, `feedId`, `sourceId`).
+    - Structured console logs in the Logstash JSON format (`@timestamp`, `level`, `logger_name`, `message`, `traceId`, `spanId`, plus MDC keys `pollId`, `feedId`, `sourceId`), and structured key-value fields per the logging contract in `plans/argus-logging.md`.
     - Plain text in the tracked `dev` profile. `local` is reserved for the git-ignored personal override.
     - `traceId` is never a Loki label.
   - **Dashboard**:

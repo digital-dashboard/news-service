@@ -45,6 +45,7 @@ public sealed interface FetchResult {
     record NotModified(URI finalUrl, @Nullable URI permanentTarget, FetchValidators validators) implements FetchResult {
     }
 
-    record Failed(FetchFailureReason reason, @Nullable Integer httpStatus) implements FetchResult {
+    record Failed(FetchFailureReason reason, @Nullable Integer httpStatus, @Nullable FetchError error)
+            implements FetchResult {
     }
 }

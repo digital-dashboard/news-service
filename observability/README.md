@@ -65,6 +65,56 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 - **API & HTTP, JVM & runtime, PostgreSQL & HikariCP, Container:** request rate, latency and status; heap, GC, threads and CPU; pool and database health; container CPU and memory.
 - **Traces, Logs:** slow and errored traces from Tempo, and the live Loki log stream.
 
+## Logs
+
+Argus logs one JSON object per line. The MDC keys (`pollId`, `feedId`, `sourceId`) and the structured fields below are top-level JSON fields, so Loki filters them after `| json`. Every message is also a readable sentence containing the key facts, because the plain-text `dev` profile does not print the fields. The full contract is in `plans/argus-logging.md`.
+
+### Fields
+
+They are emitted only when they apply.
+
+| Field | Meaning |
+|---|---|
+| `feedId`, `sourceId` | The feed and source. MDC during an ingest, a field elsewhere. |
+| `sourceKey` | The source key, for example `cbc.ca`. |
+| `url` | The redacted feed URL: scheme, host, port and path. Never a query string or user-info. |
+| `reason` | The failure reason tag, for example `io`, `http_status`, `not_a_feed`, `persist_failed`. |
+| `httpStatus` | The HTTP status code of the failed fetch. |
+| `errorType` | Simple class name of the root cause, for example `ConnectException` or `SSLHandshakeException`. |
+| `errorMessage` | The root-cause message with URLs redacted, at most 300 characters. |
+| `attempt`, `maxAttempts` | The fetch attempt that failed and how many there are, on retry lines. |
+| `consecutiveFailures`, `failingThreshold` | The feed's health counters. On a recovery line `consecutiveFailures` is the count before the recovery. |
+| `durationMs` | Elapsed time of an ingest or a poll. |
+| `contentType`, `bodyBytes` | The response of a feed that could not be parsed. `contentType` is capped at 100 characters. |
+| `existingFeedId` | On a create that conflicts with an existing feed: the feed that has the URL. |
+| `failed`, `feedsPolled`, `failedFeedIds` | On the poll summary: how many feeds failed and were polled, and which ones failed. |
+| `enabled` | On a feed enable or disable line: the new state. |
+| `articlesRemoved` | On a feed delete line: the articles removed with it. |
+| `changedFields`, `newName`, `newHomepage`, `newCountry` | On a source PATCH line: the changed field names and their new values. The homepage is redacted. |
+| `cron`, `concurrency`, `enabledFeeds`, `failingFeeds` | On the startup line: the poll schedule and the feeds it will poll. |
+| `code`, `status`, `method`, `path` | Rejected or failed requests: the problem code, HTTP status, method and path (no query string, at most 200 characters). |
+| `pollId` | MDC, set for the whole poll. |
+
+Logs never carry the admin key or any request header, article content, article GUIDs or links, a full URL, or a stack trace for an expected failure. Redaction keeps path segments, so a token embedded in a URL path would be logged. For persist and unexpected failures only `errorType` is logged, because their messages can quote article rows. A URL whose query contains a space is redacted up to the next token without `=`; a scheme-less `user:pw@host` is redacted too, but free text that merely looks like a URL may survive.
+
+### Levels for feeds
+
+- **WARN**: every failed fetch or parse of a feed, one line each, with every field above that applies.
+- **ERROR**:
+  - a feed reaches the failing threshold (default 3 consecutive failures), once per crossing: `Feed N (key) is now failing after 3 consecutive failures; last error: ...`;
+  - an unexpected ingest or persist exception, one line with the fields and the stack trace (a new feed's failed first ingest is logged the same way);
+  - a scheduled poll that fails with an error;
+  - an unhandled exception in a request, with the stack trace.
+- A handled 5xx (for example a 503 while shutting down) is a WARN without a stack trace, and a failure that the ingest already logged is not logged again with its stack trace.
+- **INFO**: a retry of a fetch, a feed recovering after failures, an ingest summary, a poll summary, and the audit lines for feed create, delete, enable, disable and source PATCH.
+- Rejected requests (4xx) are INFO. A missing or wrong admin key under `/news/v2` is a WARN with method and path only. A 404 or 405 outside `/news/v2`, and a 401 outside it, are DEBUG, to keep scanner noise out. A rejected or conflicting create is logged once, by the feed service.
+
+### Example LogQL
+
+- One feed: `{service="argus"} | json | feedId="5"`
+- All errors: `{service="argus", level="ERROR"}`
+- Why feeds fail, readable (`level` is a stream label, so it goes in the selector): `{service="argus", level="WARN"} | json | reason="io" | line_format "{{.sourceKey}} {{.errorType}}: {{.errorMessage}}"`
+
 ## Validating the dashboard
 
 ```bash

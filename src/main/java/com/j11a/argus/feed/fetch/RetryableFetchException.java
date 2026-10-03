@@ -6,11 +6,22 @@ public class RetryableFetchException extends RuntimeException {
 
     private final FetchFailureReason reason;
     private final @Nullable Integer status;
+    private final transient FetchError error;
 
-    public RetryableFetchException(FetchFailureReason reason, @Nullable Integer status) {
+    /** A transient failure with no exception behind it, such as a 5xx answer. */
+    public RetryableFetchException(FetchFailureReason reason, @Nullable Integer status, FetchError error) {
         super("Retryable fetch failure: " + reason + (status != null ? " (" + status + ")" : ""));
         this.reason = reason;
         this.status = status;
+        this.error = error;
+    }
+
+    /** A transient failure caused by an exception, which is kept as the cause. */
+    public RetryableFetchException(FetchFailureReason reason, Throwable cause) {
+        super("Retryable fetch failure: " + reason, cause);
+        this.reason = reason;
+        this.status = null;
+        this.error = FetchError.of(cause);
     }
 
     public FetchFailureReason reason() {
@@ -21,7 +32,11 @@ public class RetryableFetchException extends RuntimeException {
         return status;
     }
 
+    public FetchError error() {
+        return error;
+    }
+
     public FetchResult.Failed toFailedResult() {
-        return new FetchResult.Failed(reason, status);
+        return new FetchResult.Failed(reason, status, error);
     }
 }

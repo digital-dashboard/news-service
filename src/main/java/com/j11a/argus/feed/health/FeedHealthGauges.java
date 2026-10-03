@@ -11,9 +11,8 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
+import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -24,9 +23,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * Registered as a bean by ArgusConfiguration, which supplies the failing threshold; this package must not depend on
  * the poll package.
  */
+@Slf4j
 public class FeedHealthGauges {
-
-    private static final Logger LOG = LoggerFactory.getLogger(FeedHealthGauges.class);
 
     // A lock, not synchronized: JDBC under a monitor would pin a virtual thread to its carrier.
     private final ReentrantLock refreshLock = new ReentrantLock();
@@ -64,7 +62,7 @@ public class FeedHealthGauges {
         try {
             registerRows(readSnapshots());
         } catch (RuntimeException e) {
-            LOG.warn("Feed health gauge refresh failed; the gauges keep their previous rows", e);
+            log.warn("Feed health gauge refresh failed; the gauges keep their previous rows", e);
         } finally {
             refreshLock.unlock();
         }

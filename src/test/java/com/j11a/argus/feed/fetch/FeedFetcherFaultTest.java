@@ -1,8 +1,8 @@
 package com.j11a.argus.feed.fetch;
 
+import static com.j11a.argus.feed.fetch.FetchAssertions.assertFailed;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.j11a.argus.feed.fetch.FetchResult.Failed;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketTimeoutException;
@@ -58,14 +58,14 @@ class FeedFetcherFaultTest {
     void aBodyStreamClosedMidReadIsATimeout() {
         FetchResult result = fetchThrough(bodyFailingWith("closed"));
 
-        assertThat(result).isEqualTo(new Failed(FetchFailureReason.TIMEOUT, null));
+        assertFailed(result, FetchFailureReason.TIMEOUT, null);
     }
 
     @Test
     void aBodyReadFailingForAnyOtherReasonIsAnIoFailure() {
         FetchResult result = fetchThrough(bodyFailingWith("Connection reset"));
 
-        assertThat(result).isEqualTo(new Failed(FetchFailureReason.IO, null));
+        assertFailed(result, FetchFailureReason.IO, null);
     }
 
     @Test
@@ -74,7 +74,7 @@ class FeedFetcherFaultTest {
 
         FetchResult result = fetchThrough(failingToSend(failure));
 
-        assertThat(result).isEqualTo(new Failed(FetchFailureReason.TIMEOUT, null));
+        assertFailed(result, FetchFailureReason.TIMEOUT, null);
     }
 
     @Test
@@ -83,7 +83,7 @@ class FeedFetcherFaultTest {
 
         FetchResult result = fetchThrough(failingToSend(failure));
 
-        assertThat(result).isEqualTo(new Failed(FetchFailureReason.IO, null));
+        assertFailed(result, FetchFailureReason.IO, null);
         assertThat(Thread.interrupted()).isTrue();
     }
 }

@@ -1,8 +1,10 @@
 package com.j11a.argus.feed.fetch;
 
+import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.observability.MetricNames;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.net.URI;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.retry.RetryException;
 import org.springframework.core.retry.RetryListener;
 import org.springframework.core.retry.RetryPolicy;
@@ -16,17 +18,20 @@ import org.springframework.stereotype.Component;
  * gets its own cheap template so the retry listener can tag the counter with that call's source. The overall timeout
  * is checked between attempts only, so one attempt can still run for the HTTP read timeout.
  */
+@Slf4j
 @Component
 public class RetryingFeedFetcher {
 
     private final FeedFetcher fetcher;
     private final MeterRegistry meters;
     private final RetryPolicy policy;
+    private final int maxAttempts;
 
     public RetryingFeedFetcher(FeedFetcher fetcher, FetchProperties properties, MeterRegistry meters) {
         this.fetcher = fetcher;
         this.meters = meters;
         FetchProperties.Retry retry = properties.retry();
+        this.maxAttempts = retry.maxRetries() + 1;
         this.policy = RetryPolicy.builder()
                 .includes(RetryableFetchException.class)
                 .maxRetries(retry.maxRetries())
@@ -66,6 +71,22 @@ public class RetryingFeedFetcher {
         @Override
         public void beforeRetry(RetryPolicy retryPolicy, Retryable<?> retryable, RetryState retryState) {
             meters.counter(MetricNames.FETCH_RETRY, MetricNames.Tags.SOURCE, sourceKey).increment();
+            // The policy only retries RetryableFetchException, so that is all the listener can see.
+            logRetry(retryState.getExceptions().size(), (RetryableFetchException) retryState.getLastException());
+        }
+
+        private void logRetry(int failedAttempt, RetryableFetchException failure) {
+            String reason = failure.reason().tag();
+            String errorType = failure.error().type();
+            log.atInfo()
+                    .setMessage("Fetch attempt " + failedAttempt + "/" + maxAttempts + " for " + sourceKey
+                            + " failed (" + reason + " " + errorType + "), retrying")
+                    .addKeyValue(LogKeys.SOURCE_KEY, sourceKey)
+                    .addKeyValue(LogKeys.ATTEMPT, failedAttempt)
+                    .addKeyValue(LogKeys.MAX_ATTEMPTS, maxAttempts)
+                    .addKeyValue(LogKeys.REASON, reason)
+                    .addKeyValue(LogKeys.ERROR_TYPE, errorType)
+                    .log();
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.j11a.argus.ingest;
 
 import com.j11a.argus.feed.fetch.FeedFetcher;
+import com.j11a.argus.feed.fetch.FetchError;
 import com.j11a.argus.feed.fetch.FetchResult;
 import com.j11a.argus.feed.fetch.FetchValidators;
 import com.j11a.argus.feed.fetch.RetryingFeedFetcher;
@@ -29,11 +30,12 @@ public class FeedLoader {
         record NotModified(FetchResult.NotModified notModified) implements Loaded {
         }
 
-        /** reason is the lowercase fetch or parse reason tag. */
-        record Failed(String reason, @Nullable Integer httpStatus) implements Loaded {
-            public Failed(String reason) {
-                this(reason, null);
-            }
+        /**
+         * reason is the lowercase fetch or parse reason tag. error, contentType and bodyBytes are for logs only; the
+         * last two are set for parse failures.
+         */
+        record Failed(String reason, @Nullable Integer httpStatus, @Nullable FetchError error,
+                      @Nullable String contentType, @Nullable Integer bodyBytes) implements Loaded {
 
             public String lastError() {
                 return httpStatus != null ? reason + " " + httpStatus : reason;
@@ -48,7 +50,8 @@ public class FeedLoader {
                 implements CreateLoaded {
         }
 
-        record Failed(String reason) implements CreateLoaded {
+        record Failed(String reason, @Nullable FetchError error, @Nullable String contentType,
+                      @Nullable Integer bodyBytes) implements CreateLoaded {
         }
     }
 
@@ -69,7 +72,8 @@ public class FeedLoader {
 
     public Loaded load(URI url, FetchValidators validators, String sourceKey) {
         return switch (telemetry.fetch(sourceKey, () -> retryingFetcher.fetch(url, validators, sourceKey))) {
-            case FetchResult.Failed(var reason, var httpStatus) -> new Loaded.Failed(reason.tag(), httpStatus);
+            case FetchResult.Failed(var reason, var httpStatus, var error) ->
+                    new Loaded.Failed(reason.tag(), httpStatus, error, null, null);
             case FetchResult.NotModified notModified -> new Loaded.NotModified(notModified);
             case FetchResult.Fetched fetched -> parseFetched(fetched, clock.instant());
         };
@@ -83,11 +87,11 @@ public class FeedLoader {
         return switch (telemetry.span(FETCH_SPAN, () -> fetcher.fetch(url))) {
             case FetchResult.Failed failed -> {
                 timer.failed(failed.reason().tag());
-                yield new CreateLoaded.Failed(failed.reason().tag());
+                yield new CreateLoaded.Failed(failed.reason().tag(), failed.error(), null, null);
             }
             case FetchResult.NotModified ignored -> {
                 timer.failed(IngestTelemetry.NOT_MODIFIED);
-                yield new CreateLoaded.Failed(IngestTelemetry.NOT_MODIFIED);
+                yield new CreateLoaded.Failed(IngestTelemetry.NOT_MODIFIED, null, null, null);
             }
             case FetchResult.Fetched fetched -> parseForCreate(fetched, timer);
         };
@@ -99,7 +103,7 @@ public class FeedLoader {
             return new CreateLoaded.Created(feed, clock.instant(), fetched.validators(), fetched.body().length);
         } catch (ParseFailure e) {
             timer.parseFailed();
-            return new CreateLoaded.Failed(e.reason);
+            return new CreateLoaded.Failed(e.reason, e.error, e.contentType, e.bodyBytes);
         }
     }
 
@@ -108,7 +112,7 @@ public class FeedLoader {
             ParsedFeed feed = telemetry.span(PARSE_SPAN, () -> parse(fetched));
             return new Loaded.Parsed(feed, fetchedAt, fetched.validators());
         } catch (ParseFailure e) {
-            return new Loaded.Failed(e.reason);
+            return new Loaded.Failed(e.reason, null, e.error, e.contentType, e.bodyBytes);
         }
     }
 
@@ -116,16 +120,22 @@ public class FeedLoader {
         try {
             return parser.parse(fetched.body(), fetched.finalUrl(), fetched.contentType());
         } catch (FeedParseException e) {
-            throw new ParseFailure(e.reason().name().toLowerCase(Locale.ROOT));
+            throw new ParseFailure(e, fetched);
         }
     }
 
     private static final class ParseFailure extends RuntimeException {
         private final String reason;
+        private final transient FetchError error;
+        private final @Nullable String contentType;
+        private final int bodyBytes;
 
-        ParseFailure(String reason) {
-            super("Feed could not be parsed: " + reason);
-            this.reason = reason;
+        ParseFailure(FeedParseException cause, FetchResult.Fetched fetched) {
+            super("Feed could not be parsed: " + cause.reason());
+            this.reason = cause.reason().name().toLowerCase(Locale.ROOT);
+            this.error = FetchError.ofMessage(FeedParseException.class.getSimpleName(), cause.getMessage());
+            this.contentType = fetched.contentType();
+            this.bodyBytes = fetched.body().length;
         }
     }
 }

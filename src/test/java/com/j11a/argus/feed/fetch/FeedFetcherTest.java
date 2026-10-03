@@ -59,7 +59,7 @@ class FeedFetcherTest {
     }
 
     private static void assertFailed(FetchResult result, FetchFailureReason reason, Integer status) {
-        assertThat(result).isEqualTo(new Failed(reason, status));
+        FetchAssertions.assertFailed(result, reason, status);
     }
 
     @Test
@@ -158,7 +158,7 @@ class FeedFetcherTest {
                 });
         assertThatThrownBy(() -> fetcher.fetchRetryable(refused, FetchValidators.EMPTY))
                 .isInstanceOfSatisfying(RetryableFetchException.class,
-                        e -> assertThat(e.toFailedResult()).isEqualTo(new Failed(FetchFailureReason.IO, null)));
+                        e -> FetchAssertions.assertFailed(e.toFailedResult(), FetchFailureReason.IO, null));
     }
 
     @Test
