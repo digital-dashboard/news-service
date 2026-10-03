@@ -1,5 +1,7 @@
 package com.j11a.argus.article;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -8,12 +10,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.j11a.argus.config.WebMvcConfig;
+import com.j11a.argus.feed.FeedSummary;
+import com.j11a.argus.feed.Topic;
 import com.j11a.argus.security.SecurityConfig;
 import com.j11a.argus.source.SourceSummary;
 import com.j11a.argus.testsupport.AdminKeys;
 import com.j11a.argus.web.error.GlobalExceptionHandler;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -32,6 +37,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class ArticleControllerTest {
 
     private static final String ARTICLES = "/news/v2/articles";
+    private static final ArticleFilter EMPTY_FILTER = new ArticleFilter(Set.of(), Set.of());
 
     @Autowired
     private MockMvc mockMvc;
@@ -42,12 +48,14 @@ class ArticleControllerTest {
     private static ArticleResponse article() {
         return new ArticleResponse(1, "Ferry service resumes", "Crossings restart.", null,
                 "https://news.example.test/a", null, List.of("World"), Instant.parse("2026-10-02T10:00:00Z"),
-                null, new SourceSummary(2, "example.test", "https://news.example.test", null));
+                null, new SourceSummary(2, "example.test", "https://news.example.test", null),
+                List.of(new FeedSummary(3, "Example Feed", Topic.NEWS)));
     }
 
     @Test
     void pagedShapeCarriesContentAndAPageBlock() throws Exception {
-        when(articles.list(0, 20)).thenReturn(new PageImpl<>(List.of(article()), PageRequest.of(0, 20), 41));
+        when(articles.list(any(), eq(0), eq(20)))
+                .thenReturn(new PageImpl<>(List.of(article()), PageRequest.of(0, 20), 41));
 
         mockMvc.perform(get(ARTICLES))
                 .andExpect(status().isOk())
@@ -61,28 +69,79 @@ class ArticleControllerTest {
 
     @Test
     void timestampsAreIso8601UtcStrings() throws Exception {
-        when(articles.list(0, 20)).thenReturn(new PageImpl<>(List.of(article()), PageRequest.of(0, 20), 1));
+        when(articles.list(any(), eq(0), eq(20)))
+                .thenReturn(new PageImpl<>(List.of(article()), PageRequest.of(0, 20), 1));
 
         mockMvc.perform(get(ARTICLES))
                 .andExpect(jsonPath("$.content[0].publishedAt").value("2026-10-02T10:00:00Z"));
     }
 
     @Test
+    void responseContainsFeeds() throws Exception {
+        when(articles.list(any(), eq(0), eq(20)))
+                .thenReturn(new PageImpl<>(List.of(article()), PageRequest.of(0, 20), 1));
+
+        mockMvc.perform(get(ARTICLES))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].feeds[0].id").value(3))
+                .andExpect(jsonPath("$.content[0].feeds[0].name").value("Example Feed"))
+                .andExpect(jsonPath("$.content[0].feeds[0].topic").value("NEWS"));
+    }
+
+    @Test
     void defaultsArePageZeroSizeTwenty() throws Exception {
-        when(articles.list(0, 20)).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+        when(articles.list(any(), eq(0), eq(20)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
 
         mockMvc.perform(get(ARTICLES)).andExpect(status().isOk());
 
-        verify(articles).list(0, 20);
+        verify(articles).list(EMPTY_FILTER, 0, 20);
     }
 
     @Test
     void explicitPagingIsPassedThrough() throws Exception {
-        when(articles.list(2, 100)).thenReturn(new PageImpl<>(List.of(), PageRequest.of(2, 100), 0));
+        when(articles.list(any(), eq(2), eq(100)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(2, 100), 0));
 
         mockMvc.perform(get(ARTICLES).param("page", "2").param("size", "100")).andExpect(status().isOk());
 
-        verify(articles).list(2, 100);
+        verify(articles).list(EMPTY_FILTER, 2, 100);
+    }
+
+    @Test
+    void paramsBindAsRepeatable() throws Exception {
+        when(articles.list(any(), eq(0), eq(20)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+
+        mockMvc.perform(get(ARTICLES)
+                        .param("topic", "NEWS")
+                        .param("topic", "SPORT")
+                        .param("country", "ca")
+                        .param("country", "GB"))
+                .andExpect(status().isOk());
+
+        verify(articles).list(new ArticleFilter(Set.of(Topic.NEWS, Topic.SPORT), Set.of("CA", "GB")), 0, 20);
+    }
+
+    @Test
+    void badCountryIsRejectedNamingTheField() throws Exception {
+        mockMvc.perform(get(ARTICLES).param("country", "ZZ"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[0].field").value("country"))
+                .andExpect(jsonPath("$.errors[0].message").value("must be an ISO 3166-1 alpha-2 code"));
+
+        verifyNoInteractions(articles);
+    }
+
+    @Test
+    void badTopicIsRejected() throws Exception {
+        mockMvc.perform(get(ARTICLES).param("topic", "NOT_A_TOPIC"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[0].field").value("topic"));
+
+        verifyNoInteractions(articles);
     }
 
     @Test
@@ -98,7 +157,8 @@ class ArticleControllerTest {
 
     @Test
     void anOffsetExactlyAtTheIntLimitIsStillAccepted() throws Exception {
-        when(articles.list(21474836, 100)).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 100), 0));
+        when(articles.list(any(), eq(21474836), eq(100)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 100), 0));
 
         mockMvc.perform(get(ARTICLES).param("page", "21474836").param("size", "100")).andExpect(status().isOk());
     }
