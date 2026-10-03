@@ -101,6 +101,51 @@ class ArticleRekeyerIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void collapsedLosersFoldTheirLinksOnceEachAndTheSurvivorHoldsTheRecomputedHash() throws Exception {
+        try (ScratchDatabase db = ScratchDatabase.create(postgres)) {
+            db.migrateFirst(7, "test");
+
+            try (Connection conn = db.connect()) {
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.execute("""
+                        INSERT INTO source (id, key, name, homepage_url, created_at, updated_at)
+                        VALUES (1, 'example.com', 'Example', 'https://example.com', now(), now());
+
+                        INSERT INTO feed (id, source_id, name, url, topic, enabled, created_at, updated_at)
+                        VALUES (1, 1, 'Main', 'https://example.com/feed', 'NEWS', true, now(), now()),
+                               (2, 1, 'Other', 'https://example.com/other', 'NEWS', true, now(), now());
+
+                        INSERT INTO article (id, source_id, guid_key, raw_guid, link_key, link, title, excerpt, categories, effective_at, fetched_at, modified_at)
+                        VALUES (1, 1, 'g-old-1', 'http://www.example.com/same', 'x', 'https://example.com/same', 'Same', 'E', ARRAY[]::text[], now(), now(), now()),
+                               (2, 1, 'g-old-2', 'https://example.com/same', 'x', 'https://example.com/same', 'Same', 'E', ARRAY[]::text[], now(), now(), now()),
+                               (3, 1, 'g-old-3', 'https://www.example.com/same', 'x', 'https://example.com/same', 'Same', 'E', ARRAY[]::text[], now(), now(), now());
+
+                        INSERT INTO article_feed (article_id, feed_id, first_seen_at)
+                        VALUES (1, 1, '2026-10-01T10:00:00Z'), (2, 1, '2026-10-01T08:00:00Z'),
+                               (3, 1, '2026-10-01T09:00:00Z'), (3, 2, '2026-10-01T11:00:00Z');
+                        """);
+                }
+
+                RekeyReport report = new ArticleRekeyer().rekey(conn);
+
+                assertThat(report.collapsed()).isEqualTo(2);
+                assertThat(report.linksFolded()).isEqualTo(2);
+                String expectedHash = ContentHash.of("Same", "E", List.of());
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT feed_id, first_seen_at, content_hash FROM article_feed WHERE article_id = 1 ORDER BY feed_id");
+                     ResultSet rs = ps.executeQuery()) {
+                    assertThat(rs.next()).isTrue();
+                    assertThat(rs.getTimestamp("first_seen_at").toInstant()).isEqualTo(java.time.Instant.parse("2026-10-01T08:00:00Z"));
+                    assertThat(rs.getString("content_hash")).isEqualTo(expectedHash);
+                    assertThat(rs.next()).isTrue();
+                    assertThat(rs.getTimestamp("first_seen_at").toInstant()).isEqualTo(java.time.Instant.parse("2026-10-01T11:00:00Z"));
+                    assertThat(rs.next()).isFalse();
+                }
+            }
+        }
+    }
+
+    @Test
     void handlesNullGuidAndLinkByRetainingOldKey() throws Exception {
         try (ScratchDatabase db = ScratchDatabase.create(postgres)) {
             db.migrateFirst(7, "test");

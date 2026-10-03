@@ -1,5 +1,7 @@
 package com.j11a.argus.migration;
 
+import com.j11a.argus.article.ArticleCollapser;
+import com.j11a.argus.article.ArticleCollapser.Loser;
 import com.j11a.argus.ingest.ContentHash;
 import com.j11a.argus.ingest.EntryKeys;
 import java.sql.Array;
@@ -16,6 +18,8 @@ import org.jspecify.annotations.Nullable;
 
 public final class ArticleRekeyer {
 
+    private final ArticleCollapser collapser = new ArticleCollapser();
+
     private record ArticleRow(
             long id,
             long sourceId,
@@ -26,9 +30,6 @@ public final class ArticleRekeyer {
     }
 
     private record SourceGuidKey(long sourceId, String guidKey) {
-    }
-
-    private record Loser(long id, long survivorId) {
     }
 
     public RekeyReport rekey(Connection c) throws SQLException {
@@ -55,8 +56,8 @@ public final class ArticleRekeyer {
             }
         }
 
-        int linksFolded = foldLosers(c, losers);
-        deleteLosers(c, loserIds);
+        int linksFolded = collapser.foldLinks(c, losers);
+        collapser.deleteArticles(c, loserIds);
 
         List<Long> tempKeySurvivorIds = new ArrayList<>();
         for (ArticleRow s : survivors) {
@@ -104,39 +105,6 @@ public final class ArticleRekeyer {
             }
         }
         return rows;
-    }
-
-    private int foldLosers(Connection c, List<Loser> losers) throws SQLException {
-        if (losers.isEmpty()) {
-            return 0;
-        }
-        String sql = """
-                INSERT INTO article_feed (article_id, feed_id, first_seen_at)
-                SELECT ?, feed_id, first_seen_at FROM article_feed WHERE article_id = ?
-                ON CONFLICT (article_id, feed_id) DO UPDATE
-                SET first_seen_at = LEAST(article_feed.first_seen_at, EXCLUDED.first_seen_at)
-                """;
-        int linksFolded = 0;
-        try (PreparedStatement ps = c.prepareStatement(sql)) {
-            for (Loser loser : losers) {
-                ps.setLong(1, loser.survivorId());
-                ps.setLong(2, loser.id());
-                linksFolded += ps.executeUpdate();
-            }
-        }
-        return linksFolded;
-    }
-
-    private void deleteLosers(Connection c, List<Long> loserIds) throws SQLException {
-        if (loserIds.isEmpty()) {
-            return;
-        }
-        String sql = "DELETE FROM article WHERE id = ANY(?)";
-        try (PreparedStatement ps = c.prepareStatement(sql)) {
-            Array array = c.createArrayOf("bigint", loserIds.toArray(Long[]::new));
-            ps.setArray(1, array);
-            ps.executeUpdate();
-        }
     }
 
     private void applyTemporaryKeys(Connection c, List<Long> tempKeySurvivorIds) throws SQLException {
