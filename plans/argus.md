@@ -39,7 +39,7 @@ Durable decisions that apply across all phases:
     - `/stream`
   - Write endpoints:
     - `PATCH /sources/{id}`, `POST /sources/{id}/merge`
-    - `POST /feeds`, `PUT /feeds/{id}`, `PATCH /feeds/{id}`, `DELETE /feeds/{id}`
+    - `POST /feeds`, `PATCH /feeds/{id}`, `DELETE /feeds/{id}`
     - `/feeds/{id}/refresh`, `/feeds/refresh`, `/feeds/discover`, `/feeds/import`
     - watch create, update and delete, `/watches/{id}/seen`
   - API docs are served under `/news/v2/api-docs` and `/news/v2/swagger-ui`, so a gateway routing `/news/**` exposes them too.
@@ -339,20 +339,20 @@ Prevent duplicate subscriptions, and make source corrections clean. Exact-URL co
 Telemetry:
 - Meters:
   - The redirect counter (`permanent_applied`, `permanent_conflict`)
-  - The feed-identity-conflict counter (`via=entered|redirect|self_link`)
+  - The feed-identity-conflict counter (`kind=entered|redirect|self_link`)
   - The source-merge timer and the collapsed-article counter
 - A merge span. Each merge and each auto-disable writes an audit log line at INFO with its ids and counts.
 - Dashboard: **Feed health** gains redirect and conflict panels. **Deduplication** gains merges and collapsed articles.
 
 ### Acceptance criteria
 
-- [ ] URLs that differ only by scheme, `www.` or trailing slash, a URL that redirects to an existing feed, and a matching self link all give 409 naming the existing feed.
-- [ ] A feed's source key must agree with its host or self link; a feed declaring another outlet's site link is not attached to that outlet's source.
-- [ ] A permanent redirect updates the stored URL. A temporary redirect doesn't.
-- [ ] A permanent redirect onto another subscribed feed disables the feed with the "duplicate of" error.
-- [ ] Merging two sources with overlapping articles leaves one copy per duplicate group, with no duplicate link or match rows, and removes the empty source.
-- [ ] Moving one feed to another source behaves like a merge for that feed's articles.
-- [ ] Meter-registry tests assert the redirect, conflict and merge meters.
+- [x] URLs that differ only by scheme, `www.` or trailing slash, a URL that redirects to an existing feed, and a matching self link all give 409 naming the existing feed.
+- [x] A feed's source key must agree with its host or self link; a feed declaring another outlet's site link is not attached to that outlet's source.
+- [x] A permanent redirect updates the stored URL. A temporary redirect doesn't.
+- [x] A permanent redirect onto another subscribed feed disables the feed with the "duplicate of" error.
+- [x] Merging two sources with overlapping articles leaves one copy per duplicate group, with no duplicate link or match rows, and removes the empty source.
+- [x] Moving one feed to another source behaves like a merge for that feed's articles.
+- [x] Meter-registry tests assert the redirect, conflict and merge meters.
 
 ---
 

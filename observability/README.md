@@ -82,7 +82,7 @@ They are emitted only when they apply.
 | `feedId`, `sourceId` | The feed and source. MDC during an ingest, a field elsewhere. |
 | `sourceKey` | The source key, for example `cbc.ca`. |
 | `url` | The redacted feed URL: scheme, host, port and path. Never a query string or user-info. |
-| `reason` | The failure reason tag, for example `io`, `http_status`, `not_a_feed`, `persist_failed`. |
+| `reason` | The failure reason tag, for example `io`, `http_status`, `not_a_feed`, `persist_failed`, `duplicate_feed`, `source_changed`. |
 | `httpStatus` | The HTTP status code of the failed fetch. |
 | `errorType` | Simple class name of the root cause, for example `ConnectException` or `SSLHandshakeException`. |
 | `errorMessage` | The root-cause message with URLs redacted, at most 300 characters. |
@@ -90,11 +90,14 @@ They are emitted only when they apply.
 | `consecutiveFailures`, `failingThreshold` | The feed's health counters. On a recovery line `consecutiveFailures` is the count before the recovery. |
 | `durationMs` | Elapsed time of an ingest or a poll. |
 | `contentType`, `bodyBytes` | The response of a feed that could not be parsed. `contentType` is capped at 100 characters. |
-| `existingFeedId` | On a create that conflicts with an existing feed: the feed that has the URL. |
+| `existingFeedId` | The other feed that holds the URL: on a create or URL change that conflicts, on a self link that is not kept, and on a redirect that disables a feed as a duplicate. |
+| `kind` | On an identity conflict: `entered`, `redirect` or `self_link`. |
+| `newUrl` | On a feed URL change or an applied or conflicting permanent redirect: the new URL, redacted; `url` is the old one. |
 | `failed`, `feedsPolled`, `failedFeedIds` | On the poll summary: how many feeds failed and were polled, and which ones failed. |
 | `enabled` | On a feed enable or disable line: the new state. |
 | `articlesRemoved` | On a feed delete line: the articles removed with it. |
-| `changedFields`, `newName`, `newHomepage`, `newCountry` | On a source PATCH line: the changed field names and their new values. The homepage is redacted. |
+| `targetSourceId`, `feedsMoved`, `articlesMoved`, `articlesCopied`, `articlesCollapsed`, `linksFolded`, `sourceDeleted` | On a source merge or feed move line: the target source and the counts. `feedsMoved` is only on a merge, `articlesCopied` and `sourceDeleted` only on a feed move. |
+| `changedFields`, `newName`, `newHomepage`, `newCountry`, `newTopic` | On a source or feed PATCH line: the changed field names and their new values. The homepage is redacted. |
 | `cron`, `concurrency`, `enabledFeeds`, `failingFeeds` | On the startup line: the poll schedule and the feeds it will poll. |
 | `code`, `status`, `method`, `path` | Rejected or failed requests: the problem code, HTTP status, method and path (no query string, at most 200 characters). |
 | `pollId` | MDC, set for the whole poll. |
@@ -103,14 +106,14 @@ Logs never carry the admin key or any request header, article content, article G
 
 ### Levels for feeds
 
-- **WARN**: every failed fetch or parse of a feed, one line each, with every field above that applies.
+- **WARN**: every failed fetch or parse of a feed, one line each, with every field above that applies; a feed disabled because its permanent redirect duplicates another feed; a new feed whose site link names an existing source that nothing vouches for, so it gets its host's source.
 - **ERROR**:
   - a feed reaches the failing threshold (default 3 consecutive failures), once per crossing: `Feed N (key) is now failing after 3 consecutive failures; last error: ...`;
   - an unexpected ingest or persist exception, one line with the fields and the stack trace (a new feed's failed first ingest is logged the same way);
   - a scheduled poll that fails with an error;
   - an unhandled exception in a request, with the stack trace.
 - A handled 5xx (for example a 503 while shutting down) is a WARN without a stack trace, and a failure that the ingest already logged is not logged again with its stack trace.
-- **INFO**: a retry of a fetch, a feed recovering after failures, an ingest summary, a poll summary, and the audit lines for feed create, delete, enable, disable and source PATCH.
+- **INFO**: a retry of a fetch, a feed recovering after failures, an ingest summary, a poll summary, and the audit lines for feed create, delete, enable, disable, name or topic change, URL change, applied permanent redirect and feed move, and for source PATCH and merge. A self link that is not kept because it matches another feed is INFO too.
 - Rejected requests (4xx) are INFO. A missing or wrong admin key under `/news/v2` is a WARN with method and path only. A 404 or 405 outside `/news/v2`, and a 401 outside it, are DEBUG, to keep scanner noise out. A rejected or conflicting create is logged once, by the feed service.
 
 ### Example LogQL
