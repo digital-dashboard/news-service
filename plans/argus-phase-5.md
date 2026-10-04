@@ -87,7 +87,7 @@ Planning defaults (veto at approval):
     - Keep `MIN(first_seen_at)`, and the `content_hash` of the earliest-seen row.
     - On conflict: `first_seen_at = LEAST(…)`, `content_hash = COALESCE(existing, excluded)`.
     - Extract this into `article/ArticleCollapser` (JDBC `Connection`, no Spring), and let `ArticleRekeyer` use it. That also fixes the missing hash copy in the rekey path.
-14. **Lock order:** both source locks in ascending id. Every other path takes at most one source lock, plus the identity lock, which is never held together with a source lock.
+14. **Lock order:** both source locks in ascending id. Every other path takes at most one source lock. The identity lock may be followed by one source lock (a create locks the source it is about to insert into); never the reverse.
 15. **Stale-source fix.**
     - `ArticlePersister.persist` and `FeedService.delete` re-read `feed.source_id` after taking the lock.
     - On a mismatch the transaction rolls back and `persist` retries once with the new source.

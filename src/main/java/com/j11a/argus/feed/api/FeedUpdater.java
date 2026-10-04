@@ -1,11 +1,11 @@
 package com.j11a.argus.feed.api;
 
+import com.j11a.argus.config.Clocks;
 import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.FeedRepository;
 import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.identity.FeedIdentityRegistry;
-import com.j11a.argus.feed.identity.IdentityKind;
 import com.j11a.argus.ingest.FeedLoader;
 import com.j11a.argus.ingest.IngestTelemetry;
 import com.j11a.argus.observability.LogFields;
@@ -16,11 +16,9 @@ import com.j11a.argus.url.HttpUrls;
 import com.j11a.argus.url.LogSafe;
 import com.j11a.argus.url.StoredUrls;
 import com.j11a.argus.web.error.ApiException;
-import com.j11a.argus.web.error.ErrorCode;
 import java.net.URI;
 import java.time.Clock;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
@@ -63,22 +61,17 @@ class FeedUpdater {
     private final FeedRepository feeds;
     private final SourceService sources;
     private final SourceMerger merger;
-    private final FeedProbe probe;
     private final FeedUrlChecks urlChecks;
-    private final FeedIdentityRegistry registry;
     private final FeedHealthGauges healthGauges;
     private final JdbcClient jdbc;
     private final Clock clock;
 
-    FeedUpdater(FeedRepository feeds, SourceService sources, SourceMerger merger, FeedProbe probe,
-            FeedUrlChecks urlChecks, FeedIdentityRegistry registry, FeedHealthGauges healthGauges, JdbcClient jdbc,
-            Clock clock) {
+    FeedUpdater(FeedRepository feeds, SourceService sources, SourceMerger merger, FeedUrlChecks urlChecks,
+            FeedHealthGauges healthGauges, JdbcClient jdbc, Clock clock) {
         this.feeds = feeds;
         this.sources = sources;
         this.merger = merger;
-        this.probe = probe;
         this.urlChecks = urlChecks;
-        this.registry = registry;
         this.healthGauges = healthGauges;
         this.jdbc = jdbc;
         this.clock = clock;
@@ -89,10 +82,10 @@ class FeedUpdater {
             throw ApiException.validationFailed("request", "at least one field must be provided");
         }
         String name = strippedName(request.name());
-        Feed feed = feeds.findWithSourceById(id).orElseThrow(() -> FeedService.notFound(id));
+        Feed feed = feeds.findWithSourceById(id).orElseThrow(() -> ApiException.feedNotFound(id));
         Long targetSourceId = request.sourceId();
         if (targetSourceId != null && sources.findById(targetSourceId).isEmpty()) {
-            throw new ApiException(ErrorCode.SOURCE_NOT_FOUND, "Source " + targetSourceId + " does not exist.");
+            throw ApiException.sourceNotFound(targetSourceId);
         }
         UrlChange urlChange = prepareUrlChange(feed, request.url());
 
@@ -130,8 +123,8 @@ class FeedUpdater {
         }
         urlChecks.requireFree(UPDATING, List.of(FeedUrlChecks.entered(url)), feed.getId());
         URI uri = URI.create(url);
-        IngestTelemetry.CreateFetchTimer timer = probe.startTimer();
-        FeedLoader.CreateLoaded.Created download = probe.download(UPDATING, uri, timer);
+        IngestTelemetry.CreateFetchTimer timer = urlChecks.startTimer();
+        FeedLoader.CreateLoaded.Created download = urlChecks.download(UPDATING, uri, timer);
         timer.completed(feed.getSource().getKey(), download.bodyLength());
         return new UrlChange(url, StoredUrls.clean(download.feed().selfLink()), download);
     }
@@ -143,7 +136,7 @@ class FeedUpdater {
                 change.url(), change.download().finalUrl(), change.selfUrl());
         int updated;
         try {
-            updated = registry.withIdentityLock(() -> {
+            updated = urlChecks.underIdentityLock(() -> {
                 urlChecks.requireFree(UPDATING, candidates, id);
                 return jdbc.sql(UPDATE_URL)
                         .param("url", change.url())
@@ -153,10 +146,10 @@ class FeedUpdater {
                         .update();
             });
         } catch (DuplicateKeyException e) {
-            throw urlChecks.conflict(UPDATING, change.url(), IdentityKind.ENTERED, null);
+            throw urlChecks.lostRace(UPDATING, candidates, id);
         }
         if (updated == 0) {
-            throw FeedService.notFound(id);
+            throw ApiException.feedNotFound(id);
         }
         String oldUrl = HttpUrls.redact(feed.getUrl());
         String newUrl = HttpUrls.redact(change.url());
@@ -180,7 +173,7 @@ class FeedUpdater {
                 .param("id", id)
                 .update();
         if (updated == 0) {
-            throw FeedService.notFound(id);
+            throw ApiException.feedNotFound(id);
         }
         if (enabled != null) {
             healthGauges.refreshAfterCommit();
@@ -217,6 +210,6 @@ class FeedUpdater {
     }
 
     private OffsetDateTime now() {
-        return OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        return Clocks.utcNow(clock);
     }
 }

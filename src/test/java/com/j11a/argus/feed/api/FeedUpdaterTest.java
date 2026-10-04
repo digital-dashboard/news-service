@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Level;
 import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.FeedRepository;
 import com.j11a.argus.feed.Topic;
@@ -25,6 +26,8 @@ import com.j11a.argus.source.FeedSourceChangedException;
 import com.j11a.argus.source.Source;
 import com.j11a.argus.source.SourceMerger;
 import com.j11a.argus.source.SourceService;
+import com.j11a.argus.testsupport.LogCapture;
+import com.j11a.argus.testsupport.PatchRequests;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import java.time.Clock;
@@ -47,8 +50,8 @@ class FeedUpdaterTest {
     private final FeedIdentityTelemetry telemetry = mock(FeedIdentityTelemetry.class);
     private final FeedHealthGauges healthGauges = mock(FeedHealthGauges.class);
     private final JdbcClient jdbc = mock(JdbcClient.class);
-    private final FeedUpdater updater = new FeedUpdater(feeds, sources, merger, new FeedProbe(loader),
-            new FeedUrlChecks(registry, telemetry), registry, healthGauges, jdbc,
+    private final FeedUpdater updater = new FeedUpdater(feeds, sources, merger,
+            new FeedUrlChecks(registry, telemetry, new FeedProbe(loader)), healthGauges, jdbc,
             Clock.fixed(Instant.parse("2026-10-03T10:00:00Z"), ZoneOffset.UTC));
 
     @BeforeEach
@@ -83,7 +86,7 @@ class FeedUpdaterTest {
     void anUnknownFeedIsNotFound() {
         when(feeds.findWithSourceById(404L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> updater.patch(404L, new PatchFeedRequest(false)))
+        assertThatThrownBy(() -> updater.patch(404L, PatchRequests.enabled(false)))
                 .satisfies(e -> assertCode(e, ErrorCode.FEED_NOT_FOUND));
     }
 
@@ -106,7 +109,7 @@ class FeedUpdaterTest {
     @Test
     void aUrlThatNamesAnotherFeedIsAConflictBeforeTheDownloadAndBeforeAnyWrite() {
         when(registry.findConflict(any(), eq(9L)))
-                .thenReturn(Optional.of(new FeedIdentityRegistry.Conflict(IdentityKind.ENTERED, 4L)));
+                .thenReturn(Optional.of(new FeedIdentityRegistry.Conflict(IdentityKind.ENTERED, 4L, false)));
 
         assertThatThrownBy(() -> updater.patch(9L, new PatchFeedRequest(null, null, null, null,
                 "https://other.test/feed.xml")))
@@ -133,8 +136,16 @@ class FeedUpdaterTest {
         when(sources.findById(3L)).thenReturn(Optional.of(mock(Source.class)));
         doThrow(new FeedSourceChangedException(9L)).when(merger).moveFeed(9L, 3L);
 
-        assertThatThrownBy(() -> updater.patch(9L, new PatchFeedRequest(null, null, null, 3L, null)))
-                .satisfies(e -> assertCode(e, ErrorCode.CONFLICT));
+        try (LogCapture logs = LogCapture.start()) {
+            assertThatThrownBy(() -> updater.patch(9L, new PatchFeedRequest(null, null, null, 3L, null)))
+                    .satisfies(e -> assertCode(e, ErrorCode.CONFLICT))
+                    .hasCauseInstanceOf(FeedSourceChangedException.class);
+
+            assertThat(logs.at(Level.WARN)).singleElement().satisfies(event ->
+                    assertThat(LogCapture.keyValues(event))
+                            .containsEntry("feedId", 9L)
+                            .containsEntry("reason", "source_changed"));
+        }
         verify(merger, times(2)).moveFeed(9L, 3L);
     }
 

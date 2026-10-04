@@ -13,7 +13,6 @@ import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.feed.api.FeedService;
-import com.j11a.argus.feed.api.PatchFeedRequest;
 import com.j11a.argus.feed.identity.FeedRedirectApplier;
 import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.source.PatchSourceRequest;
@@ -24,6 +23,7 @@ import com.j11a.argus.testsupport.FeedStubServer;
 import com.j11a.argus.testsupport.Fixtures;
 import com.j11a.argus.testsupport.LogCapture;
 import com.j11a.argus.testsupport.MergeData;
+import com.j11a.argus.testsupport.PatchRequests;
 import com.j11a.argus.web.error.ApiException;
 import java.net.URI;
 import java.time.Instant;
@@ -190,8 +190,8 @@ class AuditLoggingIT extends AbstractIntegrationTest {
         long id = feedService.create(new CreateFeedRequest(stub.baseUrl() + PATH, null, Topic.NEWS, null)).id();
 
         try (LogCapture logs = LogCapture.start()) {
-            feedService.patch(id, new PatchFeedRequest(false));
-            feedService.patch(id, new PatchFeedRequest(true));
+            feedService.patch(id, PatchRequests.enabled(false));
+            feedService.patch(id, PatchRequests.enabled(true));
 
             assertThat(from(logs, Level.INFO, FeedService.class)).satisfiesExactly(
                     disabled -> {
@@ -367,5 +367,31 @@ class AuditLoggingIT extends AbstractIntegrationTest {
             });
             logs.assertNothingLogged(SECRET);
         }
+    }
+
+    @Test
+    void aRedirectClaimedOnlyAsAnotherFeedsSelfLinkLogsAWarnWithRedactedUrlsAndLeavesTheFeedEnabled() {
+        long holder = insertFeed(REDIRECT_KEY, "https://holder.example.test/f");
+        jdbcClient.sql("UPDATE feed SET self_url = :s WHERE id = :id")
+                .param("s", HELD_URL + TOKEN_QUERY).param("id", holder).update();
+        long feed = insertFeed(REDIRECT_KEY, OLD_URL);
+
+        try (LogCapture logs = LogCapture.start()) {
+            redirectApplier.apply(feed, REDIRECT_KEY, OLD_URL, URI.create(HELD_URL + TOKEN_QUERY));
+
+            assertThat(from(logs, Level.WARN, FeedRedirectApplier.class)).singleElement().satisfies(event -> {
+                assertThat(LogCapture.keyValues(event))
+                        .containsEntry(LogKeys.FEED_ID, feed)
+                        .containsEntry(LogKeys.EXISTING_FEED_ID, holder)
+                        .containsEntry(LogKeys.SOURCE_KEY, REDIRECT_KEY)
+                        .containsEntry(LogKeys.REASON, "self_link_claimed")
+                        .containsEntry(LogKeys.URL, OLD_URL)
+                        .containsEntry(LogKeys.NEW_URL, HELD_URL);
+                assertThat(event.getFormattedMessage()).contains("Feed " + feed + " keeps its URL")
+                        .contains("claimed as a self link by feed " + holder);
+            });
+            logs.assertNothingLogged(SECRET);
+        }
+        assertThat(count("SELECT count(*) FROM feed WHERE id = " + feed + " AND enabled")).isOne();
     }
 }

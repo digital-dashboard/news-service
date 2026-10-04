@@ -14,6 +14,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 class FeedHealthRecordDuplicateIT extends AbstractIntegrationTest {
 
+    private static final String URL = "https://dup.test/f";
+
     @Autowired
     private FeedHealthUpdater healthUpdater;
 
@@ -25,7 +27,7 @@ class FeedHealthRecordDuplicateIT extends AbstractIntegrationTest {
 
     private long insert() {
         long sourceId = sources.findOrCreate("dup.test", null).getId();
-        return inserter.insert(new NewFeed(sourceId, "F", "https://dup.test/f", null, null, Topic.TECH, null))
+        return inserter.insert(new NewFeed(sourceId, "F", URL, null, null, Topic.TECH, null))
                 .orElseThrow();
     }
 
@@ -35,8 +37,9 @@ class FeedHealthRecordDuplicateIT extends AbstractIntegrationTest {
         healthUpdater.recordFailure(id, "io", Instant.now());
         Instant now = Instant.parse("2026-10-03T10:00:00Z");
 
-        healthUpdater.recordDuplicate(id, 7L, now);
+        boolean updated = healthUpdater.recordDuplicate(id, URL, 7L, now);
 
+        assertThat(updated).isTrue();
         assertThat(jdbcClient.sql("""
                 SELECT enabled, last_error, consecutive_failures, last_fetched_at, updated_at
                 FROM feed WHERE id = :id
@@ -50,8 +53,22 @@ class FeedHealthRecordDuplicateIT extends AbstractIntegrationTest {
 
     @Test
     void aMissingFeedIsANoOp() {
-        healthUpdater.recordDuplicate(12345L, 7L, Instant.now());
+        boolean updated = healthUpdater.recordDuplicate(12345L, URL, 7L, Instant.now());
 
+        assertThat(updated).isFalse();
         assertThat(count("SELECT count(*) FROM feed")).isZero();
+    }
+
+    @Test
+    void aFeedWhoseUrlChangedSinceItWasLoadedIsLeftRunning() {
+        long id = insert();
+
+        boolean updated = healthUpdater.recordDuplicate(id, "https://dup.test/older-url", 7L, Instant.now());
+
+        assertThat(updated).isFalse();
+        assertThat(jdbcClient.sql("SELECT enabled, last_error FROM feed WHERE id = :id")
+                .param("id", id).query().singleRow())
+                .containsEntry("enabled", true)
+                .containsEntry("last_error", null);
     }
 }

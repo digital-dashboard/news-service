@@ -4,6 +4,7 @@ import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.source.FeedSourceChangedException;
 import com.j11a.argus.source.SourceLock;
+import com.j11a.argus.web.error.ApiException;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -17,6 +18,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 class FeedRemover {
 
     private static final String SOURCE_OF_FEED = "SELECT source_id FROM feed WHERE id = :id";
+    private static final String DELETE_FEED = "DELETE FROM feed WHERE id = :id";
     private static final String DELETE_OWNED_ARTICLES = """
             DELETE FROM article a USING article_feed mine
             WHERE mine.feed_id = :feedId AND mine.article_id = a.id
@@ -50,9 +52,9 @@ class FeedRemover {
             throw new FeedSourceChangedException(id);
         }
         int removedArticles = jdbc.sql(DELETE_OWNED_ARTICLES).param("feedId", id).update();
-        int deleted = jdbc.sql("DELETE FROM feed WHERE id = :id").param("id", id).update();
+        int deleted = jdbc.sql(DELETE_FEED).param("id", id).update();
         if (deleted == 0) {
-            throw FeedService.notFound(id);
+            throw ApiException.feedNotFound(id);
         }
         healthGauges.refreshAfterCommit();
         log.atInfo()
@@ -65,6 +67,6 @@ class FeedRemover {
 
     private long sourceOf(long feedId) {
         Optional<Long> sourceId = jdbc.sql(SOURCE_OF_FEED).param("id", feedId).query(Long.class).optional();
-        return sourceId.orElseThrow(() -> FeedService.notFound(feedId));
+        return sourceId.orElseThrow(() -> ApiException.feedNotFound(feedId));
     }
 }

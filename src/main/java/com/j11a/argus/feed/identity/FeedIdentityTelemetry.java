@@ -18,6 +18,7 @@ public class FeedIdentityTelemetry implements MeterBinder {
 
     static final String PERMANENT_APPLIED = "permanent_applied";
     static final String PERMANENT_CONFLICT = "permanent_conflict";
+    static final String PERMANENT_SKIPPED = "permanent_skipped";
 
     private final MeterRegistry meters;
 

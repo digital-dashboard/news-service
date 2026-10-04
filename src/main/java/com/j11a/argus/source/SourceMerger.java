@@ -5,13 +5,13 @@ import com.j11a.argus.article.ArticleCollapser.Loser;
 import com.j11a.argus.article.ArticleDuplicates;
 import com.j11a.argus.article.ArticleDuplicates.Mode;
 import com.j11a.argus.article.ArticleDuplicates.Row;
+import com.j11a.argus.config.Clocks;
 import com.j11a.argus.ingest.EntryKeys;
 import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import java.time.Clock;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -25,14 +25,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Merges a source into another, or moves one feed between sources. Both take the two source locks in ascending id and
- * read everything after the locks, so an overlapping merge, move or ingest sees the committed result.
+ * Merges a source into another, or moves one feed between sources. Both take the two source locks in ascending id,
+ * then (re)read what they depend on, so an overlapping merge, move or ingest sees the committed result.
  */
 @Slf4j
 @Service
 public class SourceMerger {
 
-    private record SourceRow(long id, String key, @Nullable String homepageUrl) {
+    record SourceRow(long id, String key, @Nullable String homepageUrl) {
     }
 
     private static final String IDS = "ids";
@@ -67,8 +67,8 @@ public class SourceMerger {
             DELETE FROM article_feed WHERE feed_id = :feed AND article_id = ANY(:ids)
             """;
 
-    private static final String UNLINKED = """
-            SELECT id FROM article a
+    private static final String DELETE_UNLINKED = """
+            DELETE FROM article a
             WHERE id = ANY(:ids) AND NOT EXISTS (SELECT 1 FROM article_feed af WHERE af.article_id = a.id)
             """;
 
@@ -142,6 +142,9 @@ public class SourceMerger {
     }
 
     private SourceMergeResponse mergeLocked(long sourceId, long targetSourceId) {
+        // The advisory lock key is an int, so an id that cannot exist must be refused before it is locked.
+        requireSource(sourceId);
+        requireSource(targetSourceId);
         lockInOrder(sourceId, targetSourceId);
         SourceRow source = requireSource(sourceId);
         SourceRow target = requireSource(targetSourceId);
@@ -165,6 +168,7 @@ public class SourceMerger {
     }
 
     private MoveResult moveLocked(long feedId, long expectedSourceId, long targetSourceId) {
+        requireSource(targetSourceId);
         lockInOrder(expectedSourceId, targetSourceId);
         long sourceId = feedSourceId(feedId);
         if (sourceId == targetSourceId) {
@@ -210,12 +214,12 @@ public class SourceMerger {
                 .query((rs, rowNum) -> new SourceRow(rs.getLong("id"), rs.getString("key"),
                         rs.getString("homepage_url")))
                 .optional()
-                .orElseThrow(() -> new ApiException(ErrorCode.SOURCE_NOT_FOUND, "Source " + id + " does not exist."));
+                .orElseThrow(() -> ApiException.sourceNotFound(id));
     }
 
     private long feedSourceId(long feedId) {
         return jdbc.sql(READ_FEED_SOURCE).param("id", feedId).query(Long.class).optional()
-                .orElseThrow(() -> new ApiException(ErrorCode.FEED_NOT_FOUND, "Feed " + feedId + " does not exist."));
+                .orElseThrow(() -> ApiException.feedNotFound(feedId));
     }
 
     private List<Row> articleRows(String sql, long sourceId, @Nullable Long feedId) {
@@ -242,13 +246,9 @@ public class SourceMerger {
         return keys;
     }
 
-    /** Folds the losers' links into their survivors, then deletes the losers. Returns the links written. */
     private int foldAndDelete(List<Loser> losers) {
-        return Objects.requireNonNull(jdbcTemplate.execute((ConnectionCallback<Integer>) c -> {
-            int folded = collapser.foldLinks(c, losers);
-            collapser.deleteArticles(c, losers.stream().map(Loser::id).toList());
-            return folded;
-        }));
+        return Objects.requireNonNull(
+                jdbcTemplate.execute((ConnectionCallback<Integer>) c -> collapser.collapse(c, losers)));
     }
 
     /**
@@ -263,11 +263,7 @@ public class SourceMerger {
                 (ConnectionCallback<Integer>) c -> collapser.foldLinks(c, losers, feedId)));
         Long[] loserIds = longs(losers.stream().map(Loser::id).toList());
         jdbc.sql(REMOVE_FEED_LINKS).param(FEED, feedId).param(IDS, loserIds).update();
-        List<Long> unlinked = jdbc.sql(UNLINKED).param(IDS, loserIds).query(Long.class).list();
-        jdbcTemplate.execute((ConnectionCallback<Void>) c -> {
-            collapser.deleteArticles(c, unlinked);
-            return null;
-        });
+        jdbc.sql(DELETE_UNLINKED).param(IDS, loserIds).update();
         return folded;
     }
 
@@ -292,7 +288,7 @@ public class SourceMerger {
     }
 
     private OffsetDateTime now() {
-        return OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        return Clocks.utcNow(clock);
     }
 
     private static void logMerged(SourceRow source, SourceRow target, SourceMergeResponse r) {

@@ -43,7 +43,6 @@ public final class ArticleRekeyer {
 
         List<ArticleRow> survivors = new ArrayList<>(groups.size());
         List<Loser> losers = new ArrayList<>();
-        List<Long> loserIds = new ArrayList<>();
 
         for (List<ArticleRow> group : groups.values()) {
             // Rows are ordered by source_id, id, so the first element has the lowest id (oldest survivor).
@@ -52,12 +51,10 @@ public final class ArticleRekeyer {
             for (int i = 1; i < group.size(); i++) {
                 ArticleRow loser = group.get(i);
                 losers.add(new Loser(loser.id(), survivor.id()));
-                loserIds.add(loser.id());
             }
         }
 
-        int linksFolded = collapser.foldLinks(c, losers);
-        collapser.deleteArticles(c, loserIds);
+        int linksFolded = collapser.collapse(c, losers);
 
         List<Long> tempKeySurvivorIds = new ArrayList<>();
         for (ArticleRow s : survivors) {
@@ -68,7 +65,7 @@ public final class ArticleRekeyer {
         applyTemporaryKeys(c, tempKeySurvivorIds);
         backfillSurvivors(c, survivors);
 
-        return new RekeyReport(seen, tempKeySurvivorIds.size(), loserIds.size(), linksFolded);
+        return new RekeyReport(seen, tempKeySurvivorIds.size(), losers.size(), linksFolded);
     }
 
     private List<ArticleRow> readArticles(Connection c) throws SQLException {

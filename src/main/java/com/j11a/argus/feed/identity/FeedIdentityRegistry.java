@@ -1,11 +1,10 @@
 package com.j11a.argus.feed.identity;
 
+import com.j11a.argus.config.Clocks;
 import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.url.HttpUrls;
 import com.j11a.argus.url.StoredUrls;
 import java.time.Clock;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,11 +32,18 @@ public class FeedIdentityRegistry {
     public record Candidate(IdentityKind kind, String cleanedUrl) {
     }
 
-    public record Conflict(IdentityKind kind, long existingFeedId) {
+    /** heldBySelfLink is true when no feed has this url and only a self link matches. */
+    public record Conflict(IdentityKind kind, long existingFeedId, boolean heldBySelfLink) {
     }
 
     private record FeedRow(long id, String url, @Nullable String selfUrl) {
     }
+
+    private static final String ALL_FEEDS = "SELECT id, url, self_url FROM feed ORDER BY id";
+    private static final String EXACT_HOLDER =
+            "SELECT id FROM feed WHERE (url = :u OR self_url = :u) AND id <> :id ORDER BY id LIMIT 1";
+    private static final String SELF_URL_OF = "SELECT self_url FROM feed WHERE id = :id";
+    private static final String UPDATE_SELF_URL = "UPDATE feed SET self_url = :s, updated_at = :now WHERE id = :id";
 
     private final JdbcClient jdbc;
     private final FeedIdentityLock lock;
@@ -60,26 +66,39 @@ public class FeedIdentityRegistry {
         return work.get();
     }
 
-    /** The first candidate, in list order, that matches another feed. Call it while holding the identity lock. */
+    /**
+     * The first candidate, in list order, that matches another feed. A feed whose url matches wins over one whose
+     * self link matches. Call it while holding the identity lock.
+     */
     public Optional<Conflict> findConflict(List<Candidate> candidates, @Nullable Long excludeFeedId) {
-        Map<String, Long> holders = new HashMap<>();
+        Map<String, Long> urlHolders = new HashMap<>();
+        Map<String, Long> selfHolders = new HashMap<>();
         for (FeedRow row : allFeeds()) {
-            if (excludeFeedId == null || row.id() != excludeFeedId) {
-                holders.putIfAbsent(UrlIdentity.fold(row.url()), row.id());
-                if (row.selfUrl() != null) {
-                    holders.putIfAbsent(UrlIdentity.fold(row.selfUrl()), row.id());
-                }
+            if (excludeFeedId != null && row.id() == excludeFeedId) {
+                continue;
+            }
+            urlHolders.putIfAbsent(UrlIdentity.fold(row.url()), row.id());
+            if (row.selfUrl() != null) {
+                selfHolders.putIfAbsent(UrlIdentity.fold(row.selfUrl()), row.id());
             }
         }
-        return candidates.stream()
-                .filter(candidate -> holders.containsKey(UrlIdentity.fold(candidate.cleanedUrl())))
-                .findFirst()
-                .map(candidate -> new Conflict(candidate.kind(), holders.get(UrlIdentity.fold(candidate.cleanedUrl()))));
+        for (Candidate candidate : candidates) {
+            String folded = UrlIdentity.fold(candidate.cleanedUrl());
+            Long urlHolder = urlHolders.get(folded);
+            if (urlHolder != null) {
+                return Optional.of(new Conflict(candidate.kind(), urlHolder, false));
+            }
+            Long selfHolder = selfHolders.get(folded);
+            if (selfHolder != null) {
+                return Optional.of(new Conflict(candidate.kind(), selfHolder, true));
+            }
+        }
+        return Optional.empty();
     }
 
     /** The feed, other than excludeFeedId, whose url or self url is exactly this one. */
     Optional<Long> findExactHolder(String cleanedUrl, long excludeFeedId) {
-        return jdbc.sql("SELECT id FROM feed WHERE (url = :u OR self_url = :u) AND id <> :id ORDER BY id LIMIT 1")
+        return jdbc.sql(EXACT_HOLDER)
                 .param("u", cleanedUrl)
                 .param("id", excludeFeedId)
                 .query(Long.class)
@@ -113,7 +132,7 @@ public class FeedIdentityRegistry {
     }
 
     private @Nullable String storedSelfUrl(long feedId) {
-        List<@Nullable String> stored = jdbc.sql("SELECT self_url FROM feed WHERE id = :id")
+        List<@Nullable String> stored = jdbc.sql(SELF_URL_OF)
                 .param("id", feedId)
                 .query((rs, row) -> rs.getString(1))
                 .list();
@@ -121,9 +140,9 @@ public class FeedIdentityRegistry {
     }
 
     private void updateSelfUrl(long feedId, String selfUrl) {
-        jdbc.sql("UPDATE feed SET self_url = :s, updated_at = :now WHERE id = :id")
+        jdbc.sql(UPDATE_SELF_URL)
                 .param("s", selfUrl)
-                .param("now", OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))
+                .param("now", Clocks.utcNow(clock))
                 .param("id", feedId)
                 .update();
     }
@@ -138,7 +157,7 @@ public class FeedIdentityRegistry {
     }
 
     private List<FeedRow> allFeeds() {
-        return jdbc.sql("SELECT id, url, self_url FROM feed")
+        return jdbc.sql(ALL_FEEDS)
                 .query((rs, row) -> new FeedRow(rs.getLong("id"), rs.getString("url"), rs.getString("self_url")))
                 .list();
     }

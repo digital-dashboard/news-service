@@ -1,7 +1,6 @@
 package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.awaitility.Awaitility.await;
 
 import ch.qos.logback.classic.Level;
 import com.j11a.argus.feed.Topic;
@@ -13,9 +12,7 @@ import com.j11a.argus.source.SourceMerger;
 import com.j11a.argus.source.SourceService;
 import com.j11a.argus.testsupport.LogCapture;
 import com.j11a.argus.testsupport.RssBody;
-import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,8 +23,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 class StaleSourceIT extends AbstractIntegrationTest {
 
     private static final String PATH = "/stale/feed.xml";
-    private static final int SOURCE_LOCK_NAMESPACE = 4100;
-    private static final long WAIT_SECONDS = 20;
 
     @Autowired
     private FeedIngestService ingest;
@@ -53,49 +48,21 @@ class StaleSourceIT extends AbstractIntegrationTest {
         return count("SELECT source_id FROM feed WHERE id = " + feedId);
     }
 
-    /** Holds the source lock in a transaction until released, then runs beforeCommit and commits. */
-    private CompletableFuture<Void> holdLock(long sourceId, CountDownLatch acquired, CountDownLatch release,
-            Runnable beforeCommit) {
-        return CompletableFuture.runAsync(() -> new TransactionTemplate(txManager).executeWithoutResult(status -> {
-            sourceLock.acquire(sourceId);
-            acquired.countDown();
-            awaitLatch(release);
-            beforeCommit.run();
-        }));
-    }
-
-    private static void awaitLatch(CountDownLatch latch) {
-        try {
-            assertThat(latch.await(WAIT_SECONDS, TimeUnit.SECONDS)).isTrue();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException(e);
-        }
-    }
-
-    private void awaitWaitingFor(long sourceId) {
-        await().atMost(Duration.ofSeconds(WAIT_SECONDS)).until(() -> count(
-                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid = "
-                        + SOURCE_LOCK_NAMESPACE + " AND objid = " + sourceId) > 0);
-    }
-
     @Test
     void anIngestWhoseFeedMovesWhileItWaitsOnTheSourceLockLandsInTheNewSource() throws Exception {
         long feedId = createFeed();
         long oldSource = sourceOf(feedId);
         long newSource = sources.findOrCreate("moved.example", null).getId();
         stub.serve(PATH, 200, RssBody.CONTENT_TYPE, RssBody.rss("https://stale.example.test/", null, "old1", "new1"));
-        CountDownLatch acquired = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        CompletableFuture<Void> mover = holdLock(oldSource, acquired, release, () -> merger.moveFeed(feedId, newSource));
-        awaitLatch(acquired);
+        TransactionTemplate tx = new TransactionTemplate(txManager);
+        CompletableFuture<IngestReport> ingesting;
 
-        CompletableFuture<IngestReport> ingesting = CompletableFuture.supplyAsync(() -> ingest.refresh(feedId));
-        awaitWaitingFor(oldSource);
-        release.countDown();
+        try (HeldLock mover = HeldLock.on(tx, sourceLock, oldSource, () -> merger.moveFeed(feedId, newSource))) {
+            ingesting = CompletableFuture.supplyAsync(() -> ingest.refresh(feedId));
+            awaitWaitingForSourceLock(oldSource);
+        }
 
-        IngestReport report = ingesting.get(WAIT_SECONDS, TimeUnit.SECONDS);
-        mover.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        IngestReport report = ingesting.get(LOCK_WAIT_SECONDS, TimeUnit.SECONDS);
         assertThat(report.outcome()).isEqualTo(IngestReport.Outcome.COMPLETED);
         assertThat(report.inserted()).isOne();
         assertThat(count("SELECT count(*) FROM article WHERE source_id = " + newSource)).isEqualTo(2);
@@ -111,27 +78,18 @@ class StaleSourceIT extends AbstractIntegrationTest {
         long third = sources.findOrCreate("third.example", null).getId();
         stub.serve(PATH, 200, RssBody.CONTENT_TYPE, RssBody.rss("https://stale.example.test/", null, "old1", "new1"));
         long articlesBefore = count("SELECT count(*) FROM article");
-        CountDownLatch secondHeld = new CountDownLatch(1);
-        CountDownLatch releaseSecond = new CountDownLatch(1);
-        CompletableFuture<Void> secondHolder = holdLock(second, secondHeld, releaseSecond,
-                () -> moveFeedRaw(feedId, third));
-        awaitLatch(secondHeld);
-        CountDownLatch firstHeld = new CountDownLatch(1);
-        CountDownLatch releaseFirst = new CountDownLatch(1);
-        CompletableFuture<Void> firstHolder = holdLock(first, firstHeld, releaseFirst,
-                () -> moveFeedRaw(feedId, second));
-        awaitLatch(firstHeld);
+        TransactionTemplate tx = new TransactionTemplate(txManager);
 
-        try (LogCapture logs = LogCapture.start()) {
+        try (LogCapture logs = LogCapture.start();
+                HeldLock secondHolder = HeldLock.on(tx, sourceLock, second, () -> moveFeedRaw(feedId, third))) {
+            HeldLock firstHolder = HeldLock.on(tx, sourceLock, first, () -> moveFeedRaw(feedId, second));
             CompletableFuture<IngestReport> ingesting = CompletableFuture.supplyAsync(() -> ingest.refresh(feedId));
-            awaitWaitingFor(first);
-            releaseFirst.countDown();
-            awaitWaitingFor(second);
-            releaseSecond.countDown();
+            awaitWaitingForSourceLock(first);
+            firstHolder.close();
+            awaitWaitingForSourceLock(second);
+            secondHolder.close();
 
-            IngestReport report = ingesting.get(WAIT_SECONDS, TimeUnit.SECONDS);
-            firstHolder.get(WAIT_SECONDS, TimeUnit.SECONDS);
-            secondHolder.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            IngestReport report = ingesting.get(LOCK_WAIT_SECONDS, TimeUnit.SECONDS);
 
             assertThat(report.outcome()).isEqualTo(IngestReport.Outcome.FAILED);
             assertThat(report.failureReason()).isEqualTo("source_changed");
@@ -144,21 +102,26 @@ class StaleSourceIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void aDeleteWhoseFeedMovesWhileItWaitsOnTheSourceLockStillRemovesTheFeedAndItsArticles() throws Exception {
+    void aDeleteWhoseFeedMovesWhileItWaitsRetakesTheLockOfTheNewSourceBeforeItDeletesAnything() throws Exception {
         long feedId = createFeed();
         long oldSource = sourceOf(feedId);
         long newSource = sources.findOrCreate("moved-delete.example", null).getId();
-        CountDownLatch acquired = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        CompletableFuture<Void> mover = holdLock(oldSource, acquired, release, () -> merger.moveFeed(feedId, newSource));
-        awaitLatch(acquired);
+        TransactionTemplate tx = new TransactionTemplate(txManager);
+        CompletableFuture<Void> deleting;
 
-        CompletableFuture<Void> deleting = CompletableFuture.runAsync(() -> feedService.delete(feedId));
-        awaitWaitingFor(oldSource);
-        release.countDown();
+        try (HeldLock newSourceHeld = HeldLock.on(tx, sourceLock, newSource)) {
+            try (HeldLock mover = HeldLock.on(tx, sourceLock, oldSource, () -> moveFeedRaw(feedId, newSource))) {
+                deleting = CompletableFuture.runAsync(() -> feedService.delete(feedId));
+                awaitWaitingForSourceLock(oldSource);
+            }
 
-        deleting.get(WAIT_SECONDS, TimeUnit.SECONDS);
-        mover.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            // Only the re-read under the old source's lock notices the move and queues for the new source's lock.
+            awaitWaitingForSourceLock(newSource);
+            assertThat(deleting).isNotDone();
+            assertThat(count("SELECT count(*) FROM feed WHERE id = " + feedId)).isOne();
+        }
+
+        deleting.get(LOCK_WAIT_SECONDS, TimeUnit.SECONDS);
         assertThat(count("SELECT count(*) FROM feed")).isZero();
         assertThat(count("SELECT count(*) FROM article")).isZero();
     }

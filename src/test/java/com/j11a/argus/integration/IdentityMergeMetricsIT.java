@@ -28,7 +28,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-/** Exact names, tags and counts of the phase 5 meters: redirects, identity conflicts, merges and collapses. */
+/** Exact names, tags and counts of the identity and merge meters: redirects, identity conflicts, merges and collapses. */
 class IdentityMergeMetricsIT extends AbstractIntegrationTest {
 
     private static final Instant EARLY = Instant.parse("2026-10-01T08:00:00Z");
@@ -37,6 +37,7 @@ class IdentityMergeMetricsIT extends AbstractIntegrationTest {
     private static final String OLD = "http://redirect.example.test/old";
     private static final String APPLIED = "permanent_applied";
     private static final String CONFLICT = "permanent_conflict";
+    private static final String SKIPPED = "permanent_skipped";
     private static final String MERGED_KEY = "bbci.co.uk";
     private static final String TARGET_KEY = "bbc.co.uk";
     private static final String MOVING_URL = "https://bbci.co.uk/moving";
@@ -119,6 +120,25 @@ class IdentityMergeMetricsIT extends AbstractIntegrationTest {
 
         assertThat(redirects(APPLIED)).isEqualTo(appliedBefore + 1);
         assertThat(redirects(CONFLICT)).isEqualTo(conflictBefore + 1);
+        assertThat(named(MetricNames.FEED_REDIRECT)).isNotEmpty().allSatisfy(meter ->
+                assertThat(tagKeys(meter)).containsExactlyInAnyOrder("source", OUTCOME));
+    }
+
+    @Test
+    void aRedirectClaimedOnlyAsAnotherFeedsSelfLinkIsCountedAsSkippedWithTheSameTags() {
+        long holder = insertFeed("https://redirect.example.test/holder");
+        jdbcClient.sql("UPDATE feed SET self_url = 'https://redirect.example.test/claimed' WHERE id = :id")
+                .param("id", holder).update();
+        long id = insertFeed(OLD);
+        double skippedBefore = redirects(SKIPPED);
+        double appliedBefore = redirects(APPLIED);
+        double conflictBefore = redirects(CONFLICT);
+
+        redirectApplier.apply(id, SOURCE_KEY, OLD, URI.create("https://redirect.example.test/claimed"));
+
+        assertThat(redirects(SKIPPED)).isEqualTo(skippedBefore + 1);
+        assertThat(redirects(APPLIED)).isEqualTo(appliedBefore);
+        assertThat(redirects(CONFLICT)).isEqualTo(conflictBefore);
         assertThat(named(MetricNames.FEED_REDIRECT)).isNotEmpty().allSatisfy(meter ->
                 assertThat(tagKeys(meter)).containsExactlyInAnyOrder("source", OUTCOME));
     }

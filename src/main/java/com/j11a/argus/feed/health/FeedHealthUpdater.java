@@ -111,22 +111,24 @@ public class FeedHealthUpdater {
 
     /**
      * Disables a feed whose permanent redirect lands on another feed. This is not a fetch failure, so the failure
-     * count is left alone.
+     * count is left alone. Only a feed still on storedUrl is touched, so a URL patched since the poll loaded it keeps
+     * running; returns whether a row was updated.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void recordDuplicate(long feedId, long existingFeedId, Instant now) {
+    public boolean recordDuplicate(long feedId, String storedUrl, long existingFeedId, Instant now) {
         String reason = "duplicate of feed " + existingFeedId;
-        jdbc.sql("""
+        return jdbc.sql("""
                 UPDATE feed
                 SET enabled = false,
                     last_error = :reason,
                     last_fetched_at = :now,
                     updated_at = :now
-                WHERE id = :id
+                WHERE id = :id AND url = :url
                 """)
                 .param("id", feedId)
+                .param("url", storedUrl)
                 .param("reason", reason.length() > MAX_ERROR_LENGTH ? reason.substring(0, MAX_ERROR_LENGTH) : reason)
                 .param("now", now.atOffset(ZoneOffset.UTC))
-                .update();
+                .update() > 0;
     }
 }

@@ -39,6 +39,16 @@ class FeedIdentityTelemetryTest {
     }
 
     @Test
+    void aSkippedRedirectCountsUnderItsOwnOutcomeAndLeavesTheOthersAlone() {
+        telemetry.redirect("bbc.co.uk", FeedIdentityTelemetry.PERMANENT_SKIPPED);
+
+        assertThat(registry.get("argus.feed.redirect")
+                .tags("source", "bbc.co.uk", "outcome", "permanent_skipped").counter().count()).isOne();
+        assertThat(registry.find("argus.feed.redirect").tag("outcome", "permanent_applied").counter()).isNull();
+        assertThat(registry.find("argus.feed.redirect").tag("outcome", "permanent_conflict").counter()).isNull();
+    }
+
+    @Test
     void kindTagsAreTheDocumentedValues() {
         assertThat(IdentityKind.values()).extracting(IdentityKind::tag)
                 .containsExactly("entered", "redirect", "self_link");

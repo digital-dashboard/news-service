@@ -1,16 +1,26 @@
 package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import ch.qos.logback.classic.Level;
 import com.j11a.argus.feed.FeedInserter;
 import com.j11a.argus.feed.NewFeed;
 import com.j11a.argus.feed.Topic;
+import com.j11a.argus.feed.health.FeedHealthUpdater;
+import com.j11a.argus.feed.identity.FeedIdentityRegistry;
+import com.j11a.argus.feed.identity.FeedIdentityTelemetry;
 import com.j11a.argus.feed.identity.FeedRedirectApplier;
 import com.j11a.argus.feed.identity.FeedRedirectApplier.RedirectOutcome;
 import com.j11a.argus.source.SourceService;
 import com.j11a.argus.testsupport.LogCapture;
 import java.net.URI;
+import java.time.Clock;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -28,6 +38,15 @@ class FeedRedirectApplierIT extends AbstractIntegrationTest {
 
     @Autowired
     private SourceService sources;
+
+    @Autowired
+    private FeedIdentityRegistry registry;
+
+    @Autowired
+    private FeedIdentityTelemetry identityTelemetry;
+
+    @Autowired
+    private Clock clock;
 
     private long insert(String url) {
         long sourceId = sources.findOrCreate(SOURCE_KEY, null).getId();
@@ -129,14 +148,77 @@ class FeedRedirectApplierIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void aTargetMatchingAnotherFeedsSelfUrlIsAConflictToo() {
+    void aTargetClaimedOnlyAsAnotherFeedsSelfLinkIsSkippedAndTheFeedKeepsItsUrlAndStaysEnabled() {
         long holder = insert("https://holder.test/f");
         jdbcClient.sql("UPDATE feed SET self_url = :s WHERE id = :id")
-                .param("s", NEW).param("id", holder).update();
+                .param("s", NEW + "?t=SECRET").param("id", holder).update();
+        long id = insert(OLD);
+        double skippedBefore = redirects("permanent_skipped");
+        double conflictsBefore = redirects("permanent_conflict");
+
+        try (LogCapture logs = LogCapture.start()) {
+            RedirectOutcome outcome = applier.apply(id, SOURCE_KEY, OLD, URI.create(NEW + "?t=SECRET"));
+
+            assertThat(outcome).isEqualTo(new RedirectOutcome.Skipped(holder));
+            assertThat(logs.at(Level.WARN, FeedRedirectApplier.class)).singleElement().satisfies(event -> {
+                assertThat(LogCapture.keyValues(event))
+                        .containsEntry("feedId", id)
+                        .containsEntry("existingFeedId", holder)
+                        .containsEntry("sourceKey", SOURCE_KEY)
+                        .containsEntry("reason", "self_link_claimed")
+                        .containsEntry("url", OLD)
+                        .containsEntry("newUrl", NEW);
+                assertThat(event.getFormattedMessage())
+                        .isEqualTo("Feed " + id + " keeps its URL: its permanent redirect to " + NEW
+                                + " is claimed as a self link by feed " + holder);
+            });
+            logs.assertNothingLogged("SECRET");
+        }
+        assertThat(jdbcClient.sql("SELECT enabled, last_error, url FROM feed WHERE id = :id")
+                .param("id", id).query().singleRow())
+                .containsEntry("enabled", true)
+                .containsEntry("last_error", null)
+                .containsEntry("url", OLD);
+        assertThat(redirects("permanent_skipped")).isEqualTo(skippedBefore + 1);
+        assertThat(redirects("permanent_conflict")).isEqualTo(conflictsBefore);
+    }
+
+    @Test
+    void aTargetThatIsOneFeedsUrlAndAnotherFeedsSelfLinkStillDisablesTheFeed() {
+        long selfHolder = insert("https://self-holder.test/f");
+        jdbcClient.sql("UPDATE feed SET self_url = :s WHERE id = :id")
+                .param("s", NEW).param("id", selfHolder).update();
+        long urlHolder = insert(NEW);
         long id = insert(OLD);
 
-        assertThat(applier.apply(id, SOURCE_KEY, OLD, URI.create(NEW)))
-                .isEqualTo(new RedirectOutcome.Conflict(holder));
+        RedirectOutcome outcome = applier.apply(id, SOURCE_KEY, OLD, URI.create(NEW));
+
+        assertThat(outcome).isEqualTo(new RedirectOutcome.Conflict(urlHolder));
+        assertThat(count("SELECT count(*) FROM feed WHERE id = " + id + " AND NOT enabled")).isOne();
+    }
+
+    @Test
+    void aFeedWhoseUrlWasPatchedAfterThePollLoadedItIsNotDisabledWhenTheOldUrlsRedirectDuplicatesAnotherFeed() {
+        insert(NEW);
+        long id = insert(OLD);
+        jdbcClient.sql("UPDATE feed SET url = 'https://patched.test/feed' WHERE id = :id").param("id", id).update();
+        FeedHealthUpdater health = mock(FeedHealthUpdater.class);
+        FeedRedirectApplier local = new FeedRedirectApplier(jdbcClient, registry, identityTelemetry, health, clock);
+        double conflictsBefore = redirects("permanent_conflict");
+
+        try (LogCapture logs = LogCapture.start()) {
+            RedirectOutcome outcome = local.apply(id, SOURCE_KEY, OLD, URI.create(NEW));
+
+            assertThat(outcome).isEqualTo(new RedirectOutcome.NoChange());
+            assertThat(logs.at(Level.WARN)).isEmpty();
+        }
+        verify(health, never()).recordDuplicate(anyLong(), anyString(), anyLong(), any());
+        assertThat(jdbcClient.sql("SELECT enabled, last_error, url FROM feed WHERE id = :id")
+                .param("id", id).query().singleRow())
+                .containsEntry("enabled", true)
+                .containsEntry("last_error", null)
+                .containsEntry("url", "https://patched.test/feed");
+        assertThat(redirects("permanent_conflict")).isEqualTo(conflictsBefore);
     }
 
     @Test

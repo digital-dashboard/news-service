@@ -66,7 +66,7 @@ public class ArticlePersister {
     /**
      * A move or merge may have changed the feed's source since it was loaded, and only the lock makes this read
      * reliable. A mismatch rolls the transaction back so the caller can retry with the feed re-read. A feed that is
-     * gone is left to fail on its foreign key, as it always has.
+     * gone is left to fail on its foreign key.
      */
     private void requireFeedStillIn(long feedId, long sourceId) {
         Long current = jdbc.sql("SELECT source_id FROM feed WHERE id = :id")

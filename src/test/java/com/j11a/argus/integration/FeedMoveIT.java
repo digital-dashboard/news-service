@@ -2,7 +2,6 @@ package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.awaitility.Awaitility.await;
 
 import ch.qos.logback.classic.Level;
 import com.j11a.argus.observability.LogKeys;
@@ -14,7 +13,6 @@ import com.j11a.argus.testsupport.LogCapture;
 import com.j11a.argus.testsupport.MergeData;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -30,7 +28,6 @@ class FeedMoveIT extends AbstractIntegrationTest {
 
     private static final Instant EARLY = Instant.parse("2026-10-01T08:00:00Z");
     private static final Instant LATE = Instant.parse("2026-10-01T10:00:00Z");
-    private static final long WAIT_SECONDS = 20;
 
     @Autowired
     private SourceMerger merger;
@@ -184,12 +181,11 @@ class FeedMoveIT extends AbstractIntegrationTest {
     @Test
     void movingToTheCurrentSourceChangesNothingAndTakesNoLock() throws Exception {
         TransactionTemplate tx = new TransactionTemplate(txManager);
-        try (HeldLock held = HeldLock.on(tx, sourceLock, source)) {
+        try (HeldLock ignored = HeldLock.on(tx, sourceLock, source)) {
             MoveResult result = CompletableFuture.supplyAsync(() -> merger.moveFeed(moving, source))
-                    .get(WAIT_SECONDS, TimeUnit.SECONDS);
+                    .get(LOCK_WAIT_SECONDS, TimeUnit.SECONDS);
 
             assertThat(result).isEqualTo(new MoveResult(moving, source, source, 0, 0, 0, 0, false));
-            assertThat(held).isNotNull();
         }
         assertThat(feedSource(moving)).isEqualTo(source);
     }
@@ -202,6 +198,16 @@ class FeedMoveIT extends AbstractIntegrationTest {
                 .isInstanceOfSatisfying(ApiException.class, e -> {
                     assertThat(e.code()).isEqualTo(ErrorCode.SOURCE_NOT_FOUND);
                     assertThat(e.getMessage()).isEqualTo("Source " + (target + 100) + " does not exist.");
+                });
+        assertThat(feedSource(moving)).isEqualTo(source);
+    }
+
+    @Test
+    void aTargetIdBeyondTheLockKeyRangeIs404NotAnArithmeticFailure() {
+        assertThatThrownBy(() -> merger.moveFeed(moving, 5_000_000_000L))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.code()).isEqualTo(ErrorCode.SOURCE_NOT_FOUND);
+                    assertThat(e.getMessage()).isEqualTo("Source 5000000000 does not exist.");
                 });
         assertThat(feedSource(moving)).isEqualTo(source);
     }
@@ -253,12 +259,11 @@ class FeedMoveIT extends AbstractIntegrationTest {
         CompletableFuture<MoveResult> move = tx.execute(status -> {
             sourceLock.acquire(source);
             CompletableFuture<MoveResult> pending = CompletableFuture.supplyAsync(() -> merger.moveFeed(moving, target));
-            await().atMost(Duration.ofSeconds(WAIT_SECONDS)).until(
-                    () -> count("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted") > 0);
+            awaitAnyAdvisoryWaiter();
             jdbcClient.sql("UPDATE feed SET source_id = :id WHERE id = :feed")
                     .param("id", reassignedTo).param("feed", moving).update();
             return pending;
         });
-        return move.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        return move.get(LOCK_WAIT_SECONDS, TimeUnit.SECONDS);
     }
 }

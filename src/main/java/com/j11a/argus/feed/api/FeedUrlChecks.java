@@ -4,6 +4,8 @@ import com.j11a.argus.feed.identity.FeedIdentityRegistry;
 import com.j11a.argus.feed.identity.FeedIdentityRegistry.Candidate;
 import com.j11a.argus.feed.identity.FeedIdentityTelemetry;
 import com.j11a.argus.feed.identity.IdentityKind;
+import com.j11a.argus.ingest.FeedLoader;
+import com.j11a.argus.ingest.IngestTelemetry;
 import com.j11a.argus.observability.LogFields;
 import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.url.HttpUrls;
@@ -15,23 +17,30 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.stereotype.Component;
 
-/** The identity checks that create and a URL change share: the three candidates and the 409 they turn into. */
+/**
+ * Everything create and a URL change share about a feed's URL identity: the probe download, the identity lock, the
+ * three candidates and the 409 they turn into.
+ */
 @Slf4j(topic = FeedService.AUDIT_LOGGER)
 @Component
 class FeedUrlChecks {
 
     private final FeedIdentityRegistry registry;
     private final FeedIdentityTelemetry telemetry;
+    private final FeedProbe probe;
 
-    FeedUrlChecks(FeedIdentityRegistry registry, FeedIdentityTelemetry telemetry) {
+    FeedUrlChecks(FeedIdentityRegistry registry, FeedIdentityTelemetry telemetry, FeedProbe probe) {
         this.registry = registry;
         this.telemetry = telemetry;
+        this.probe = probe;
     }
 
     static Candidate entered(String cleanedUrl) {
@@ -54,11 +63,37 @@ class FeedUrlChecks {
         }
     }
 
+    IngestTelemetry.CreateFetchTimer startTimer() {
+        return probe.startTimer();
+    }
+
+    FeedLoader.CreateLoaded.Created download(String action, URI uri, IngestTelemetry.CreateFetchTimer timer) {
+        return probe.download(action, uri, timer);
+    }
+
+    /** One short transaction that holds the identity lock while work runs. */
+    <T> T underIdentityLock(Supplier<T> work) {
+        return registry.withIdentityLock(work);
+    }
+
     /** Throws the 409 for the first candidate that names another feed. Hold the identity lock for a binding answer. */
     void requireFree(String action, List<Candidate> candidates, @Nullable Long excludeFeedId) {
-        registry.findConflict(candidates, excludeFeedId).ifPresent(conflict -> {
-            throw conflict(action, candidates.getFirst().cleanedUrl(), conflict.kind(), conflict.existingFeedId());
-        });
+        Optional<FeedIdentityRegistry.Conflict> conflict = registry.findConflict(candidates, excludeFeedId);
+        if (conflict.isPresent()) {
+            throw conflict(action, candidates.getFirst().cleanedUrl(), conflict.get().kind(),
+                    conflict.get().existingFeedId());
+        }
+    }
+
+    /**
+     * The 409 for a write that a unique index refused although the checks passed, naming the feed that holds the URL
+     * when it can still be found. Call it outside the transaction the index aborted.
+     */
+    ApiException lostRace(String action, List<Candidate> candidates, @Nullable Long excludeFeedId) {
+        String enteredUrl = candidates.getFirst().cleanedUrl();
+        return registry.findConflict(candidates, excludeFeedId)
+                .map(conflict -> conflict(action, enteredUrl, conflict.kind(), conflict.existingFeedId()))
+                .orElseGet(() -> conflict(action, enteredUrl, IdentityKind.ENTERED, null));
     }
 
     ApiException conflict(String action, String enteredUrl, IdentityKind kind, @Nullable Long existingFeedId) {

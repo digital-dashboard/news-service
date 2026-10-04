@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -30,7 +31,9 @@ import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.FeedLoader;
 import com.j11a.argus.ingest.IngestTelemetry;
 import com.j11a.argus.source.Source;
+import com.j11a.argus.source.SourceLock;
 import com.j11a.argus.source.SourceService;
+import com.j11a.argus.testsupport.PatchRequests;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import java.net.URI;
@@ -43,6 +46,7 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -66,9 +70,11 @@ class FeedServiceTest {
     private final PollProperties properties = new PollProperties("0 */15 * * * *", 8, 3);
     private final IngestTelemetry.CreateFetchTimer timer = mock(IngestTelemetry.CreateFetchTimer.class);
     private final Clock clock = Clock.fixed(FETCHED_AT, ZoneOffset.UTC);
-    private final FeedService service = new FeedService(feeds, inserter, sources, new FeedProbe(loader),
-            new FeedUrlChecks(registry, identityTelemetry), registry, updater, remover, ingest, healthUpdater,
-            healthGauges, properties, clock);
+    private final SourceLock sourceLock = mock(SourceLock.class);
+    private final FeedCreator creator = new FeedCreator(feeds, inserter, sources, sourceLock,
+            new FeedUrlChecks(registry, identityTelemetry, new FeedProbe(loader)));
+    private final FeedService service = new FeedService(feeds, creator,
+            new FirstIngest(ingest, healthUpdater, healthGauges, clock), updater, remover, properties);
 
     @BeforeEach
     void stubSource() {
@@ -76,6 +82,7 @@ class FeedServiceTest {
         when(source.getId()).thenReturn(3L);
         when(source.getKey()).thenReturn("example.test");
         when(sources.resolveAutomatic(any(), any(), any(URI.class))).thenReturn(source);
+        when(sources.exists(3L)).thenReturn(true);
         when(loader.startCreateFetch()).thenReturn(timer);
         when(registry.withIdentityLock(any())).thenAnswer(invocation -> {
             Supplier<?> work = invocation.getArgument(0);
@@ -111,7 +118,7 @@ class FeedServiceTest {
         loads("Example", null);
         when(inserter.insert(any())).thenReturn(Optional.empty());
         when(registry.findConflict(any(), isNull())).thenReturn(Optional.empty(), Optional.empty(),
-                Optional.of(new FeedIdentityRegistry.Conflict(IdentityKind.ENTERED, 77L)));
+                Optional.of(new FeedIdentityRegistry.Conflict(IdentityKind.ENTERED, 77L, false)));
 
         assertThatThrownBy(() -> service.create(request()))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
@@ -124,7 +131,7 @@ class FeedServiceTest {
     @Test
     void anEnteredUrlThatNamesAnExistingFeedIsRejectedBeforeAnyDownload() {
         when(registry.findConflict(any(), isNull()))
-                .thenReturn(Optional.of(new FeedIdentityRegistry.Conflict(IdentityKind.ENTERED, 5L)));
+                .thenReturn(Optional.of(new FeedIdentityRegistry.Conflict(IdentityKind.ENTERED, 5L, false)));
 
         assertThatThrownBy(() -> service.create(request()))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
@@ -140,7 +147,7 @@ class FeedServiceTest {
         loads(new ParsedFeed("T", "https://example.test/", "https://example.test/self.xml", null, List.of()),
                 redirected);
         when(registry.findConflict(any(), isNull())).thenReturn(Optional.empty(),
-                Optional.of(new FeedIdentityRegistry.Conflict(IdentityKind.REDIRECT, 8L)));
+                Optional.of(new FeedIdentityRegistry.Conflict(IdentityKind.REDIRECT, 8L, false)));
 
         assertThatThrownBy(() -> service.create(request()))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
@@ -200,6 +207,7 @@ class FeedServiceTest {
         when(explicit.getId()).thenReturn(42L);
         when(explicit.getKey()).thenReturn("explicit.test");
         when(sources.findById(42L)).thenReturn(Optional.of(explicit));
+        when(sources.exists(42L)).thenReturn(true);
         when(inserter.insert(any())).thenReturn(Optional.of(9L));
         Feed stored = storedFeed();
         when(feeds.findWithSourceById(9L)).thenReturn(Optional.of(stored));
@@ -354,7 +362,7 @@ class FeedServiceTest {
     void patchDelegatesToTheUpdaterAndReturnsTheStoredFeed() {
         Feed stored = storedFeed();
         when(feeds.findWithSourceById(9L)).thenReturn(Optional.of(stored));
-        PatchFeedRequest request = new PatchFeedRequest(false);
+        PatchFeedRequest request = PatchRequests.enabled(false);
 
         FeedResponse response = service.patch(9L, request);
 
@@ -367,5 +375,75 @@ class FeedServiceTest {
         service.delete(9L);
 
         verify(remover).delete(9L);
+    }
+
+    private static Source sourceWithId(long id) {
+        Source source = mock(Source.class);
+        when(source.getId()).thenReturn(id);
+        when(source.getKey()).thenReturn("source-" + id + ".test");
+        return source;
+    }
+
+    @Test
+    void anExplicitSourceThatIsGoneOnceItIsLockedIs404AndNothingIsInserted() {
+        loads("Example", null);
+        Source explicit = sourceWithId(42L);
+        when(sources.findById(42L)).thenReturn(Optional.of(explicit));
+        when(sources.exists(42L)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.create(new CreateFeedRequest(URL, null, Topic.TECH, 42L)))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.code()).isEqualTo(ErrorCode.SOURCE_NOT_FOUND);
+                    assertThat(e.getMessage()).isEqualTo("Source 42 does not exist.");
+                });
+        verify(sourceLock).acquire(42L);
+        verify(inserter, never()).insert(any());
+        verifyNoInteractions(ingest);
+    }
+
+    @Test
+    void theSourceIsLockedBeforeTheInsert() {
+        loads("Example", null);
+        when(inserter.insert(any())).thenReturn(Optional.of(9L));
+        Feed stored = storedFeed();
+        when(feeds.findWithSourceById(9L)).thenReturn(Optional.of(stored));
+
+        service.create(request());
+
+        InOrder order = inOrder(sourceLock, inserter);
+        order.verify(sourceLock).acquire(3L);
+        order.verify(inserter).insert(any());
+    }
+
+    @Test
+    void anAutomaticallyResolvedSourceThatIsGoneOnceItIsLockedIsResolvedAgainOnceAndThatOneIsLocked() {
+        loads("Example", null);
+        Source merged = sourceWithId(3L);
+        Source fresh = sourceWithId(4L);
+        when(sources.resolveAutomatic(any(), any(), any(URI.class))).thenReturn(merged, fresh);
+        when(sources.exists(3L)).thenReturn(false);
+        when(sources.exists(4L)).thenReturn(true);
+        when(inserter.insert(any())).thenReturn(Optional.of(9L));
+        Feed stored = storedFeed();
+        when(feeds.findWithSourceById(9L)).thenReturn(Optional.of(stored));
+
+        service.create(request());
+
+        ArgumentCaptor<NewFeed> inserted = ArgumentCaptor.forClass(NewFeed.class);
+        verify(inserter).insert(inserted.capture());
+        assertThat(inserted.getValue().sourceId()).isEqualTo(4L);
+        verify(sourceLock).acquire(3L);
+        verify(sourceLock).acquire(4L);
+    }
+
+    @Test
+    void anAutomaticallyResolvedSourceThatIsGoneAgainIsAConflictTheCallerCanRetry() {
+        loads("Example", null);
+        when(sources.exists(3L)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.create(request()))
+                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.CONFLICT));
+        verify(sources, org.mockito.Mockito.times(2)).resolveAutomatic(any(), any(), any(URI.class));
+        verify(inserter, never()).insert(any());
     }
 }

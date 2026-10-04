@@ -21,6 +21,7 @@ import com.j11a.argus.feed.fetch.FetchValidators;
 import com.j11a.argus.feed.health.FailingThreshold;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
+import com.j11a.argus.feed.identity.FeedIdentityHooks;
 import com.j11a.argus.feed.identity.FeedIdentityRegistry;
 import com.j11a.argus.feed.identity.FeedRedirectApplier;
 import com.j11a.argus.feed.identity.FeedRedirectApplier.RedirectOutcome;
@@ -79,7 +80,8 @@ class FeedIngestServiceTest {
 
         IngestTelemetry telemetry = new IngestTelemetry(ObservationRegistry.create(), registry, Tracer.NOOP);
         service = new FeedIngestService(feedRepository, loader, persister, telemetry,
-                healthUpdater, healthGauges, new FailingThreshold(3), redirectApplier, identityRegistry, clock);
+                new IngestHealth(healthUpdater, healthGauges, new FailingThreshold(3)),
+                new FeedIdentityHooks(redirectApplier, identityRegistry), clock);
     }
 
     private static ParsedFeed oneEntryWithNothingOptional() {
@@ -428,6 +430,20 @@ class FeedIngestServiceTest {
 
         assertThat(report.outcome()).isEqualTo(IngestReport.Outcome.COMPLETED);
         verify(healthUpdater).recordSuccess(1L, STORED, FETCHED_AT);
+    }
+
+    @Test
+    void aSkippedRedirectLeavesTheFeedAsItIsAndTheIngestGoesOn() {
+        loadsParsedWithPermanentTarget(TARGET);
+        when(redirectApplier.apply(1L, "example.test", STORED_URL, TARGET))
+                .thenReturn(new RedirectOutcome.Skipped(7L));
+        when(persister.persist(any(), any(), any())).thenReturn(noCounts());
+
+        IngestReport report = service.refresh(1L);
+
+        assertThat(report.outcome()).isEqualTo(IngestReport.Outcome.COMPLETED);
+        verify(healthUpdater).recordSuccess(1L, STORED, FETCHED_AT);
+        verify(healthUpdater, never()).recordFailure(anyLong(), any(), any());
     }
 
     @Test

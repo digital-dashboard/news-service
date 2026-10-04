@@ -2,7 +2,6 @@ package com.j11a.argus.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -17,7 +16,6 @@ import com.j11a.argus.testsupport.LogCapture;
 import com.j11a.argus.testsupport.MergeData;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -38,8 +36,7 @@ class SourceMergeIT extends AbstractIntegrationTest {
     private static final Instant LATE = Instant.parse("2026-10-01T10:00:00Z");
     private static final String STORY = "https://example.test/a/story";
     private static final String SOURCES = "/news/v2/sources";
-    private static final int LOCK_NAMESPACE = 4100;
-    private static final long WAIT_SECONDS = 20;
+    private static final long BEYOND_INT = 5_000_000_000L;
 
     @Autowired
     private SourceMerger merger;
@@ -188,6 +185,18 @@ class SourceMergeIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void aSourceOrTargetIdBeyondTheLockKeyRangeIs404NamingItNotA500() throws Exception {
+        postMerge(source, "{\"targetSourceId\":" + BEYOND_INT + "}")
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("SOURCE_NOT_FOUND"))
+                .andExpect(jsonPath("$.detail").value("Source " + BEYOND_INT + " does not exist."));
+        postMerge(BEYOND_INT, "{\"targetSourceId\":" + target + "}")
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.detail").value("Source " + BEYOND_INT + " does not exist."));
+        assertThat(count("SELECT count(*) FROM source")).isEqualTo(2);
+    }
+
+    @Test
     void thePostReturnsTheMergeCounts() throws Exception {
         data.article(source, "g1", null, EARLY);
 
@@ -250,19 +259,20 @@ class SourceMergeIT extends AbstractIntegrationTest {
         TransactionTemplate tx = new TransactionTemplate(txManager);
         CompletableFuture<SourceMergeResponse> merge;
         // The higher id is merged into the lower one while the lower id's lock is held elsewhere.
-        try (HeldLock held = HeldLock.on(tx, sourceLock, source)) {
+        try (HeldLock ignored = HeldLock.on(tx, sourceLock, source)) {
             merge = CompletableFuture.supplyAsync(() -> merger.merge(target, source));
-            await().atMost(Duration.ofSeconds(WAIT_SECONDS)).until(this::someAdvisoryLockIsWaiting);
+            awaitWaitingForSourceLock(source);
 
             Boolean higherLockIsFree = tx.execute(status -> jdbcClient
                     .sql("SELECT pg_try_advisory_xact_lock(:ns, :id)")
-                    .param("ns", LOCK_NAMESPACE).param("id", Math.toIntExact(target))
+                    .param("ns", SOURCE_LOCK_NAMESPACE).param("id", Math.toIntExact(target))
                     .query(Boolean.class).single());
             assertThat(higherLockIsFree).isTrue();
-            assertThat(held).isNotNull();
+            assertThat(isWaitingForSourceLock(target)).isFalse();
+            assertThat(merge).isNotDone();
         }
 
-        assertThat(merge.get(WAIT_SECONDS, TimeUnit.SECONDS).sourceId()).isEqualTo(target);
+        assertThat(merge.get(LOCK_WAIT_SECONDS, TimeUnit.SECONDS).sourceId()).isEqualTo(target);
     }
 
     @Test
@@ -272,12 +282,12 @@ class SourceMergeIT extends AbstractIntegrationTest {
             sourceLock.acquire(source);
             CompletableFuture<SourceMergeResponse> pending =
                     CompletableFuture.supplyAsync(() -> merger.merge(source, target));
-            await().atMost(Duration.ofSeconds(WAIT_SECONDS)).until(this::someAdvisoryLockIsWaiting);
+            awaitWaitingForSourceLock(source);
             data.article(source, "written-during-merge", null, LATE);
             return pending;
         });
 
-        SourceMergeResponse response = merge.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        SourceMergeResponse response = merge.get(LOCK_WAIT_SECONDS, TimeUnit.SECONDS);
 
         assertThat(response.articlesMoved()).isEqualTo(1);
         assertThat(guidsOf(target)).containsExactly("written-during-merge");
@@ -285,7 +295,7 @@ class SourceMergeIT extends AbstractIntegrationTest {
 
     private SourceMergeResponse mergeAfter(CyclicBarrier start, long from, long into) {
         try {
-            start.await(WAIT_SECONDS, TimeUnit.SECONDS);
+            start.await(LOCK_WAIT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
@@ -294,13 +304,9 @@ class SourceMergeIT extends AbstractIntegrationTest {
 
     private static Object outcome(CompletableFuture<SourceMergeResponse> future) throws Exception {
         try {
-            return future.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            return future.get(LOCK_WAIT_SECONDS, TimeUnit.SECONDS);
         } catch (ExecutionException e) {
             return e.getCause();
         }
-    }
-
-    private boolean someAdvisoryLockIsWaiting() {
-        return count("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted") > 0;
     }
 }

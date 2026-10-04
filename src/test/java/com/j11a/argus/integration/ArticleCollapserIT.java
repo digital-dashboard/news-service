@@ -118,6 +118,22 @@ class ArticleCollapserIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void collapseFoldsTheLinksIntoTheSurvivorAndThenDeletesTheLosers() throws SQLException {
+        long survivor = data.article(source, "s", null, EARLY);
+        long loser = data.article(source, "l", null, LATE);
+        data.link(loser, feed, LATE, "hash-loser");
+
+        int written;
+        try (Connection c = dataSource.getConnection()) {
+            written = collapser.collapse(c, List.of(new Loser(loser, survivor)));
+        }
+
+        assertThat(written).isOne();
+        assertThat(links(survivor)).containsExactly(new Link(survivor, feed, LATE, "hash-loser"));
+        assertThat(count("SELECT count(*) FROM article WHERE id = " + loser)).isZero();
+    }
+
+    @Test
     void foldingWithoutLosersWritesNothing() throws SQLException {
         assertThat(fold(List.of(), null)).isZero();
     }

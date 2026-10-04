@@ -13,11 +13,6 @@ public record PatchFeedRequest(
         @Positive @Nullable Long sourceId,
         @Size(max = 2048) @AbsoluteHttpUrl @Nullable String url) {
 
-    /** Enables or disables the feed and changes nothing else. */
-    public PatchFeedRequest(boolean enabled) {
-        this(enabled, null, null, null, null);
-    }
-
     public boolean isEmpty() {
         return enabled == null && name == null && topic == null && sourceId == null && url == null;
     }

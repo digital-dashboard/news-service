@@ -4,10 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import ch.qos.logback.classic.Level;
 import com.j11a.argus.feed.Topic;
-import com.j11a.argus.feed.api.PatchFeedRequest;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
 import com.j11a.argus.feed.poll.PollingStartupLogger;
 import com.j11a.argus.testsupport.LogCapture;
+import com.j11a.argus.testsupport.PatchRequests;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +28,7 @@ class PollingStartupLoggingIT extends AbstractIntegrationTest {
         for (int i = 0; i < 3; i++) {
             healthUpdater.recordFailure(failing, "io", Instant.now());
         }
-        feedService.patch(disabled, new PatchFeedRequest(false));
+        feedService.patch(disabled, PatchRequests.enabled(false));
 
         try (LogCapture logs = LogCapture.start()) {
             startupLogger.logPollingSchedule();

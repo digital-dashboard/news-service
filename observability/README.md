@@ -51,7 +51,7 @@ Nothing here is deployed by this repository. These are versioned blueprints that
 - **Overview:** is the service up, how long has it run, are requests failing or slow, age of the last completed poll (`never` until the first poll after a restart), counts of enabled and failing feeds, and total articles inserted in the last 24h.
 - **Polling:** duration of feed polling runs (p95 and max by trigger), poll outcomes (`completed`: the run reached the end even if some feeds failed; `failed`: the run itself threw; `interrupted`: shutdown cut it short), transient HTTP fetch retries by source, and the share of fetches that ended in 304 Not Modified. The `source` variable filters the retries and the 304 ratio.
 - **Feed health:** one table row per feed with its state, consecutive failures and time since the last successful fetch (including 304), with a link to the feed's Loki logs. Failures are orange from 1 and red from 3; time since last success is orange from 1 hour and red from 6 hours, and `never` means the feed has not succeeded since it was added. **Stalest feeds** lists the five longest-stale feeds; a feed that never succeeded is lifted above all others and shows as `never`.
-  - **Permanent redirects by outcome:** `argus_feed_redirect_total` by `outcome`. `permanent_applied` moved a feed to its redirect target; `permanent_conflict` means the target already belongs to another feed, so the feed was disabled as a duplicate.
+  - **Permanent redirects by outcome:** `argus_feed_redirect_total` by `outcome`. `permanent_applied` moved a feed to its redirect target; `permanent_conflict` means the target is another feed's URL, so the feed was disabled as a duplicate; `permanent_skipped` means the target is only another feed's self link, so the feed kept its URL and keeps polling. The panel follows the `source` variable.
   - **Identity conflicts by kind:** `argus_feed_identity_conflict_total` by `kind` (`entered`, `redirect`, `self_link`): requests rejected because the URL matches another feed. All three series exist at zero from startup.
 - **Ingestion pipeline:** are feed fetches succeeding and how fast (outcomes by reason, fetch and ingest p95 per source), and how large the downloads are. The `source` variable filters these panels.
 - **Deduplication:** what happened to entries and how sources serialise ingest. All panels follow the `source` variable.
@@ -82,7 +82,7 @@ They are emitted only when they apply.
 | `feedId`, `sourceId` | The feed and source. MDC during an ingest, a field elsewhere. |
 | `sourceKey` | The source key, for example `cbc.ca`. |
 | `url` | The redacted feed URL: scheme, host, port and path. Never a query string or user-info. |
-| `reason` | The failure reason tag, for example `io`, `http_status`, `not_a_feed`, `persist_failed`, `duplicate_feed`, `source_changed`. |
+| `reason` | The failure reason tag, for example `io`, `http_status`, `not_a_feed`, `persist_failed`, `duplicate_feed`, `source_changed`; on a skipped permanent redirect, `self_link_claimed`. |
 | `httpStatus` | The HTTP status code of the failed fetch. |
 | `errorType` | Simple class name of the root cause, for example `ConnectException` or `SSLHandshakeException`. |
 | `errorMessage` | The root-cause message with URLs redacted, at most 300 characters. |
@@ -90,9 +90,9 @@ They are emitted only when they apply.
 | `consecutiveFailures`, `failingThreshold` | The feed's health counters. On a recovery line `consecutiveFailures` is the count before the recovery. |
 | `durationMs` | Elapsed time of an ingest or a poll. |
 | `contentType`, `bodyBytes` | The response of a feed that could not be parsed. `contentType` is capped at 100 characters. |
-| `existingFeedId` | The other feed that holds the URL: on a create or URL change that conflicts, on a self link that is not kept, and on a redirect that disables a feed as a duplicate. |
+| `existingFeedId` | The other feed that holds the URL: on a create or URL change that conflicts, on a self link that is not kept, and on a redirect that disables a feed as a duplicate or is skipped because another feed claims it as a self link. |
 | `kind` | On an identity conflict: `entered`, `redirect` or `self_link`. |
-| `newUrl` | On a feed URL change or an applied or conflicting permanent redirect: the new URL, redacted; `url` is the old one. |
+| `newUrl` | On a feed URL change or an applied, conflicting or skipped permanent redirect: the new URL, redacted; `url` is the old one. |
 | `failed`, `feedsPolled`, `failedFeedIds` | On the poll summary: how many feeds failed and were polled, and which ones failed. |
 | `enabled` | On a feed enable or disable line: the new state. |
 | `articlesRemoved` | On a feed delete line: the articles removed with it. |
@@ -106,7 +106,7 @@ Logs never carry the admin key or any request header, article content, article G
 
 ### Levels for feeds
 
-- **WARN**: every failed fetch or parse of a feed, one line each, with every field above that applies; a feed disabled because its permanent redirect duplicates another feed; a new feed whose site link names an existing source that nothing vouches for, so it gets its host's source.
+- **WARN**: every failed fetch or parse of a feed, one line each, with every field above that applies; a feed disabled because its permanent redirect duplicates another feed; a permanent redirect skipped because its target is only another feed's self link (the feed keeps its URL); a feed that changed source twice during an ingest (nothing written, reason `source_changed`); a feed whose self link could not be recorded; a feed move or delete that found the feed in another source twice (the request is a 409); a new feed whose site link names an existing source that nothing vouches for, so it gets its host's source.
 - **ERROR**:
   - a feed reaches the failing threshold (default 3 consecutive failures), once per crossing: `Feed N (key) is now failing after 3 consecutive failures; last error: ...`;
   - an unexpected ingest or persist exception, one line with the fields and the stack trace (a new feed's failed first ingest is logged the same way);

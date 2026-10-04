@@ -261,7 +261,8 @@ class ArgusDashboardTest {
         assertThat(redirects.path("title").asString()).isEqualTo("Permanent redirects by outcome");
         assertThat(gridPos(redirects)).isEqualTo(new GridPos(0, 35, 12, 8));
         assertThat(expr(redirects, 0)).isEqualTo(
-                "sum by (outcome) (rate(argus_feed_redirect_total{job=\"argus\"}[$__rate_interval]))");
+                "sum by (outcome) (rate(argus_feed_redirect_total{job=\"argus\",source=~\"$source\"}[$__rate_interval]))");
+        assertThat(redirects.path("description").asString()).contains("permanent_skipped");
         assertThat(redirects.path("fieldConfig").path("defaults").path("unit").asString()).isEqualTo("ops");
 
         JsonNode conflicts = panel(61);
@@ -269,6 +270,8 @@ class ArgusDashboardTest {
         assertThat(gridPos(conflicts)).isEqualTo(new GridPos(12, 35, 12, 8));
         assertThat(expr(conflicts, 0)).isEqualTo(
                 "sum by (kind) (rate(argus_feed_identity_conflict_total{job=\"argus\"}[$__rate_interval]))");
+        assertThat(conflicts.path("description").asString())
+                .contains("redirect (where the download ended after redirects)");
     }
 
     @Test
@@ -279,7 +282,7 @@ class ArgusDashboardTest {
         assertThat(expr(merges, 0)).isEqualTo(
                 "sum by (type) (rate(argus_source_merge_seconds_count{job=\"argus\"}[$__rate_interval]))");
         assertThat(expr(merges, 1)).isEqualTo(
-                "histogram_quantile(0.95, sum by (le, type) (rate(argus_source_merge_seconds_bucket{job=\"argus\"}[$__rate_interval])))");
+                "histogram_quantile(0.95, sum by (le, type) (rate(argus_source_merge_seconds_bucket{job=\"argus\"}[$__rate_interval]))) >= 0");
 
         JsonNode collapsed = panel(63);
         assertThat(collapsed.path("title").asString()).isEqualTo("Collapsed articles by type");

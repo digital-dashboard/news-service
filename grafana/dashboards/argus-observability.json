@@ -1267,7 +1267,7 @@
       "id": 60,
       "type": "timeseries",
       "title": "Permanent redirects by outcome",
-      "description": "Permanent (301/308) redirects the poller met, per second by outcome. permanent_applied: the feed's stored URL was moved to the redirect target. permanent_conflict: the target already belongs to another feed, so this feed was disabled as a duplicate (see its Loki WARN line).",
+      "description": "Permanent (301/308) redirects the poller met, per second by outcome. permanent_applied: the feed's stored URL was moved to the redirect target. permanent_conflict: the target is another feed's URL, so this feed was disabled as a duplicate. permanent_skipped: the target is only claimed as another feed's self link, so this feed kept its URL and keeps polling. Both leave a Loki WARN line.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1285,7 +1285,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum by (outcome) (rate(argus_feed_redirect_total{job=\"argus\"}[$__rate_interval]))",
+          "expr": "sum by (outcome) (rate(argus_feed_redirect_total{job=\"argus\",source=~\"$source\"}[$__rate_interval]))",
           "editorMode": "code",
           "range": true,
           "instant": false,
@@ -1324,7 +1324,7 @@
       "id": 61,
       "type": "timeseries",
       "title": "Identity conflicts by kind",
-      "description": "Feed create or update requests rejected because the URL matches another feed, per second by the kind of match: entered (the submitted URL), redirect (a permanent redirect target) or self_link (the feed's own declared URL).",
+      "description": "Feed create or update requests rejected because the URL matches another feed, per second by the kind of match: entered (the submitted URL), redirect (where the download ended after redirects) or self_link (the feed's own declared URL).",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -2068,7 +2068,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, type) (rate(argus_source_merge_seconds_bucket{job=\"argus\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, type) (rate(argus_source_merge_seconds_bucket{job=\"argus\"}[$__rate_interval]))) >= 0",
           "editorMode": "code",
           "range": true,
           "instant": false,

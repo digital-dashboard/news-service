@@ -3,7 +3,6 @@ package com.j11a.argus.source;
 import com.j11a.argus.feed.FeedRepository;
 import com.j11a.argus.feed.FeedSummary;
 import com.j11a.argus.web.error.ApiException;
-import com.j11a.argus.web.error.ErrorCode;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,7 +45,7 @@ public class SourceQueryService {
 
     @Transactional(readOnly = true)
     public SourceResponse get(long id) {
-        Source source = sources.findById(id).orElseThrow(() -> notFound(id));
+        Source source = sources.findById(id).orElseThrow(() -> ApiException.sourceNotFound(id));
         return toResponses(List.of(source)).getFirst();
     }
 
@@ -79,7 +78,4 @@ public class SourceQueryService {
                 .toList();
     }
 
-    private static ApiException notFound(long id) {
-        return new ApiException(ErrorCode.SOURCE_NOT_FOUND, "Source " + id + " does not exist.");
-    }
 }

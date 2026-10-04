@@ -24,6 +24,14 @@ public class ApiException extends RuntimeException {
                 Map.of(Problems.ERRORS_PROPERTY, List.of(new FieldProblem(field, message))));
     }
 
+    public static ApiException feedNotFound(long id) {
+        return new ApiException(ErrorCode.FEED_NOT_FOUND, "Feed " + id + " does not exist.");
+    }
+
+    public static ApiException sourceNotFound(long id) {
+        return new ApiException(ErrorCode.SOURCE_NOT_FOUND, "Source " + id + " does not exist.");
+    }
+
     public ErrorCode code() {
         return code;
     }

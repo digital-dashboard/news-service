@@ -63,7 +63,7 @@ class FeedIdentityRegistryIT extends AbstractIntegrationTest {
         long existing = insert(URL, null);
 
         assertThat(check(IdentityKind.ENTERED, "http://example.test/rss", null))
-                .contains(new Conflict(IdentityKind.ENTERED, existing));
+                .contains(new Conflict(IdentityKind.ENTERED, existing, false));
     }
 
     @Test
@@ -71,7 +71,7 @@ class FeedIdentityRegistryIT extends AbstractIntegrationTest {
         long existing = insert(URL, null);
 
         assertThat(check(IdentityKind.REDIRECT, "https://example.test/rss", null))
-                .contains(new Conflict(IdentityKind.REDIRECT, existing));
+                .contains(new Conflict(IdentityKind.REDIRECT, existing, false));
     }
 
     @Test
@@ -79,7 +79,7 @@ class FeedIdentityRegistryIT extends AbstractIntegrationTest {
         long existing = insert(URL, null);
 
         assertThat(check(IdentityKind.SELF_LINK, "https://example.test/rss/", null))
-                .contains(new Conflict(IdentityKind.SELF_LINK, existing));
+                .contains(new Conflict(IdentityKind.SELF_LINK, existing, false));
     }
 
     @Test
@@ -87,7 +87,25 @@ class FeedIdentityRegistryIT extends AbstractIntegrationTest {
         long existing = insert(URL, SELF);
 
         assertThat(check(IdentityKind.ENTERED, "http://www.selfhost.test/atom.xml/", null))
-                .contains(new Conflict(IdentityKind.ENTERED, existing));
+                .contains(new Conflict(IdentityKind.ENTERED, existing, true));
+    }
+
+    @Test
+    void aFeedWhoseUrlMatchesWinsOverAFeedWhoseSelfUrlOnlyMatches() {
+        insert("https://claims-it-as-self.test/f", "https://claimed.test/f");
+        long urlHolder = insert("https://claimed.test/f/", null);
+
+        assertThat(check(IdentityKind.REDIRECT, "http://claimed.test/f", null))
+                .contains(new Conflict(IdentityKind.REDIRECT, urlHolder, false));
+    }
+
+    @Test
+    void ofSeveralFeedsHoldingTheSameIdentityTheLowestIdIsReported() {
+        long lowest = insert("http://www.same.test/f", null);
+        insert("https://same.test/f/", null);
+
+        assertThat(check(IdentityKind.ENTERED, "https://same.test/f", null))
+                .contains(new Conflict(IdentityKind.ENTERED, lowest, false));
     }
 
     @Test
@@ -115,7 +133,7 @@ class FeedIdentityRegistryIT extends AbstractIntegrationTest {
                 new Candidate(IdentityKind.REDIRECT, "https://one.test/f"),
                 new Candidate(IdentityKind.SELF_LINK, "https://two.test/f")), null);
 
-        assertThat(conflict).contains(new Conflict(IdentityKind.REDIRECT, first));
+        assertThat(conflict).contains(new Conflict(IdentityKind.REDIRECT, first, false));
     }
 
     @Test

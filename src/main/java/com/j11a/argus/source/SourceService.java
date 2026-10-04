@@ -5,7 +5,6 @@ import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.url.HttpUrls;
 import com.j11a.argus.url.StoredUrls;
 import com.j11a.argus.web.error.ApiException;
-import com.j11a.argus.web.error.ErrorCode;
 import java.net.URI;
 import java.time.Clock;
 import java.time.OffsetDateTime;
@@ -36,6 +35,8 @@ public class SourceService {
             VALUES (:key, :key, :homepage, :now, :now)
             ON CONFLICT (key) DO NOTHING
             """;
+
+    private static final String EXISTS = "SELECT EXISTS (SELECT 1 FROM source WHERE id = :id)";
 
     private static final String UPDATE = """
             UPDATE source
@@ -112,6 +113,11 @@ public class SourceService {
         return sources.findById(id);
     }
 
+    /** Asks the database rather than the persistence context, so a delete committed by another transaction shows. */
+    public boolean exists(long id) {
+        return Boolean.TRUE.equals(jdbc.sql(EXISTS).param("id", id).query(Boolean.class).single());
+    }
+
     @Transactional
     public SourceResponse patch(long id, PatchSourceRequest request) {
         if (request.isEmpty()) {
@@ -134,7 +140,7 @@ public class SourceService {
                 .update();
 
         if (updated == 0) {
-            throw new ApiException(ErrorCode.SOURCE_NOT_FOUND, "Source " + id + " does not exist.");
+            throw ApiException.sourceNotFound(id);
         }
 
         SourceResponse response = queryService.get(id);

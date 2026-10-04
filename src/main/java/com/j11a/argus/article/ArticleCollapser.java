@@ -9,7 +9,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Folds duplicate articles into their survivors on a plain JDBC connection, so a Liquibase change can use it.
- * Phases 6, 9 and 11 add story counts, watch-match folding and purged rows here.
+ * Extension point for per-article data that must follow a survivor.
  */
 public final class ArticleCollapser {
 
@@ -31,6 +31,13 @@ public final class ArticleCollapser {
             """;
 
     private static final String DELETE_ARTICLES = "DELETE FROM article WHERE id = ANY(?)";
+
+    /** Folds the losers' links into their survivors, then deletes the losers. Returns the links written. */
+    public int collapse(Connection c, List<Loser> losers) throws SQLException {
+        int folded = foldLinks(c, losers);
+        deleteArticles(c, losers.stream().map(Loser::id).toList());
+        return folded;
+    }
 
     /** Folds every link of each loser into its survivor, and returns how many survivor links were written. */
     public int foldLinks(Connection c, List<Loser> losers) throws SQLException {

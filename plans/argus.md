@@ -327,30 +327,31 @@ Telemetry:
 
 Prevent duplicate subscriptions, and make source corrections clean. Exact-URL conflicts (409 `FEED_URL_CONFLICT`) already exist from Phase 2; this phase adds the scheme, `www.`, redirect and self-link checks.
 - Creating or updating a feed checks the URL as entered, the final URL after redirects, and the feed's self link against every existing feed's identity URLs. A conflict returns 409 `FEED_URL_CONFLICT` with `existingFeedId`.
-- During polling, a 301 or 308 updates the stored URL. The fetcher reports `permanentTarget`, the end of the leading 301/308 chain, for this. If that would collide with another feed, the feed is disabled and its last error says "duplicate of feed {id}".
+- During polling, a 301 or 308 updates the stored URL. The fetcher reports `permanentTarget`, the end of the leading 301/308 chain, for this. If that would collide with another feed's URL, the feed is disabled with a WARN and its last error says "duplicate of feed {id}". If the target is only another feed's self link, the feed keeps its URL, keeps polling, and a WARN says so.
 - `POST /sources/{id}/merge` and changing a feed's `sourceId` both:
   - Move feeds and articles in one transaction holding both source locks.
-  - Collapse duplicates to the oldest article, folding in feed links and watch matches.
-  - Recalculate story source counts.
+  - Collapse duplicates to the oldest article, folding in feed links.
   - Delete the empty source.
+
+  Watch-match folding arrives with phase 9 and story source counts with phase 6, since neither exists yet.
 
   Merging a source into itself gives `SOURCE_MERGE_INVALID`.
 
 Telemetry:
 - Meters:
-  - The redirect counter (`permanent_applied`, `permanent_conflict`)
+  - The redirect counter (`permanent_applied`, `permanent_conflict`, `permanent_skipped`)
   - The feed-identity-conflict counter (`kind=entered|redirect|self_link`)
   - The source-merge timer and the collapsed-article counter
-- A merge span. Each merge and each auto-disable writes an audit log line at INFO with its ids and counts.
+- A merge span. Each merge, feed move and applied redirect writes an audit log line at INFO with its ids and counts; an auto-disable writes one at WARN.
 - Dashboard: **Feed health** gains redirect and conflict panels. **Deduplication** gains merges and collapsed articles.
 
 ### Acceptance criteria
 
 - [x] URLs that differ only by scheme, `www.` or trailing slash, a URL that redirects to an existing feed, and a matching self link all give 409 naming the existing feed.
-- [x] A feed's source key must agree with its host or self link; a feed declaring another outlet's site link is not attached to that outlet's source.
+- [x] A site link that names an existing source is trusted only when the feed host's key, the self link's key, or the host of one of that source's feeds vouches for it; otherwise the feed gets its host's source and a WARN is logged. An explicit `sourceId` is never checked.
 - [x] A permanent redirect updates the stored URL. A temporary redirect doesn't.
-- [x] A permanent redirect onto another subscribed feed disables the feed with the "duplicate of" error.
-- [x] Merging two sources with overlapping articles leaves one copy per duplicate group, with no duplicate link or match rows, and removes the empty source.
+- [x] A permanent redirect onto another subscribed feed's URL disables the feed with the "duplicate of" error; onto a URL that is only another feed's self link, the feed keeps its URL and a WARN is logged.
+- [x] Merging two sources with overlapping articles leaves one copy per duplicate group, with no duplicate link rows, and removes the empty source. Watch matches and story counts are not folded yet: they arrive with phases 9 and 6.
 - [x] Moving one feed to another source behaves like a merge for that feed's articles.
 - [x] Meter-registry tests assert the redirect, conflict and merge meters.
 
