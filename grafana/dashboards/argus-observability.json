@@ -8,7 +8,7 @@
     "observability"
   ],
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "editable": true,
   "graphTooltip": 1,
   "refresh": "30s",
@@ -1264,6 +1264,120 @@
       }
     },
     {
+      "id": 60,
+      "type": "timeseries",
+      "title": "Permanent redirects by outcome",
+      "description": "Permanent (301/308) redirects the poller met, per second by outcome. permanent_applied: the feed's stored URL was moved to the redirect target. permanent_conflict: the target already belongs to another feed, so this feed was disabled as a duplicate (see its Loki WARN line).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (outcome) (rate(argus_feed_redirect_total{job=\"argus\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 61,
+      "type": "timeseries",
+      "title": "Identity conflicts by kind",
+      "description": "Feed create or update requests rejected because the URL matches another feed, per second by the kind of match: entered (the submitted URL), redirect (a permanent redirect target) or self_link (the feed's own declared URL).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (kind) (rate(argus_feed_identity_conflict_total{job=\"argus\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 29,
       "type": "row",
       "title": "Ingestion pipeline",
@@ -1272,7 +1386,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 43
       },
       "panels": []
     },
@@ -1289,7 +1403,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 36
+        "y": 44
       },
       "targets": [
         {
@@ -1346,7 +1460,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 36
+        "y": 44
       },
       "targets": [
         {
@@ -1403,7 +1517,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 44
+        "y": 52
       },
       "targets": [
         {
@@ -1460,7 +1574,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 44
+        "y": 52
       },
       "targets": [
         {
@@ -1513,7 +1627,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 52
+        "y": 60
       },
       "panels": []
     },
@@ -1530,7 +1644,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 53
+        "y": 61
       },
       "targets": [
         {
@@ -1591,7 +1705,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 53
+        "y": 61
       },
       "targets": [
         {
@@ -1648,7 +1762,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 61
+        "y": 69
       },
       "targets": [
         {
@@ -1705,7 +1819,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 61
+        "y": 69
       },
       "targets": [
         {
@@ -1762,7 +1876,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 61
+        "y": 69
       },
       "targets": [
         {
@@ -1819,7 +1933,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 69
+        "y": 77
       },
       "targets": [
         {
@@ -1876,7 +1990,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 69
+        "y": 77
       },
       "targets": [
         {
@@ -1921,6 +2035,149 @@
       }
     },
     {
+      "id": 62,
+      "type": "timeseries",
+      "title": "Source merges: rate and p95",
+      "description": "Source merges and feed moves per second by type (merge or feed_move), and their 95th percentile duration. Merges are rare, so gaps are normal. The p95 is on the right axis.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 85
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (type) (rate(argus_source_merge_seconds_count{job=\"argus\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{type}} rate"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, type) (rate(argus_source_merge_seconds_bucket{job=\"argus\"}[$__rate_interval])))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{type}} p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 63,
+      "type": "timeseries",
+      "title": "Collapsed articles by type",
+      "description": "Duplicate articles removed by a source merge or feed move over each interval, by type (merge or feed_move). Zero means the run found no duplicates.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 85
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (type) (increase(argus_article_collapsed_total{job=\"argus\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 35,
       "type": "row",
       "title": "Data quality",
@@ -1929,7 +2186,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 77
+        "y": 93
       },
       "panels": []
     },
@@ -1946,7 +2203,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 78
+        "y": 94
       },
       "targets": [
         {
@@ -2003,7 +2260,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 78
+        "y": 94
       },
       "targets": [
         {
@@ -2056,7 +2313,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 86
+        "y": 102
       },
       "panels": []
     },
@@ -2073,7 +2330,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 87
+        "y": 103
       },
       "targets": [
         {
@@ -2126,7 +2383,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 95
+        "y": 111
       },
       "panels": []
     },
@@ -2143,7 +2400,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 96
+        "y": 112
       },
       "targets": [
         {
@@ -2200,7 +2457,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 96
+        "y": 112
       },
       "targets": [
         {
@@ -2281,7 +2538,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 104
+        "y": 120
       },
       "targets": [
         {
@@ -2338,7 +2595,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 112
+        "y": 128
       },
       "panels": []
     },
@@ -2355,7 +2612,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 113
+        "y": 129
       },
       "targets": [
         {
@@ -2424,7 +2681,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 113
+        "y": 129
       },
       "targets": [
         {
@@ -2481,7 +2738,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 121
+        "y": 137
       },
       "targets": [
         {
@@ -2537,7 +2794,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 121
+        "y": 137
       },
       "targets": [
         {
@@ -2603,7 +2860,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 129
+        "y": 145
       },
       "panels": []
     },
@@ -2620,7 +2877,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 130
+        "y": 146
       },
       "targets": [
         {
@@ -2712,7 +2969,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 130
+        "y": 146
       },
       "targets": [
         {
@@ -2769,7 +3026,7 @@
         "h": 4,
         "w": 12,
         "x": 0,
-        "y": 138
+        "y": 154
       },
       "targets": [
         {
@@ -2835,7 +3092,7 @@
         "h": 4,
         "w": 12,
         "x": 0,
-        "y": 142
+        "y": 158
       },
       "targets": [
         {
@@ -2897,7 +3154,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 142
+        "y": 158
       },
       "targets": [
         {
@@ -2961,7 +3218,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 150
+        "y": 166
       },
       "panels": []
     },
@@ -2978,7 +3235,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 151
+        "y": 167
       },
       "targets": [
         {
@@ -3034,7 +3291,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 151
+        "y": 167
       },
       "targets": [
         {
@@ -3087,7 +3344,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 159
+        "y": 175
       },
       "panels": []
     },
@@ -3104,7 +3361,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 160
+        "y": 176
       },
       "targets": [
         {
@@ -3134,7 +3391,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 170
+        "y": 186
       },
       "panels": []
     },
@@ -3151,7 +3408,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 171
+        "y": 187
       },
       "targets": [
         {
@@ -3210,7 +3467,7 @@
         "h": 14,
         "w": 24,
         "x": 0,
-        "y": 179
+        "y": 195
       },
       "targets": [
         {

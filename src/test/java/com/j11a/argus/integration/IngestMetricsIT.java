@@ -3,18 +3,25 @@ package com.j11a.argus.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.j11a.argus.feed.FeedInserter;
+import com.j11a.argus.feed.NewFeed;
 import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
+import com.j11a.argus.feed.identity.FeedRedirectApplier;
 import com.j11a.argus.feed.poll.PollTestHooks;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.observability.MeterSpec;
 import com.j11a.argus.observability.MetricCatalogue;
 import com.j11a.argus.observability.MetricNames;
+import com.j11a.argus.source.SourceMerger;
+import com.j11a.argus.source.SourceService;
+import com.j11a.argus.testsupport.MergeData;
 import com.j11a.argus.web.error.ApiException;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
+import java.net.URI;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
@@ -23,6 +30,7 @@ import org.springframework.context.ApplicationContext;
 
 class IngestMetricsIT extends AbstractIntegrationTest {
 
+    private static final String REDIRECT_KEY = "redirect.example.test";
     private static final String PATH = "/metrics/sparse.xml";
     /** argus.fetch.retry.max-retries, which the it profile leaves at its default of 2. */
     private static final int MAX_RETRIES = 2;
@@ -39,6 +47,18 @@ class IngestMetricsIT extends AbstractIntegrationTest {
 
     @Autowired
     private ApplicationContext context;
+
+    @Autowired
+    private FeedRedirectApplier redirectApplier;
+
+    @Autowired
+    private FeedInserter inserter;
+
+    @Autowired
+    private SourceService sources;
+
+    @Autowired
+    private SourceMerger merger;
 
     private double decisions(String decision, String reason) {
         return meters().entries(SITE_SOURCE, decision, reason);
@@ -141,13 +161,34 @@ class IngestMetricsIT extends AbstractIntegrationTest {
     /**
      * The create path registers fetch, ingest, decision and data-quality meters. A failing refresh adds
      * argus.fetch.retry, and the scheduled poll adds argus.poll and argus.scheduled.job (argus.poll.last.success is
-     * a gauge registered at startup).
+     * a gauge registered at startup). The redirect and merge meters are driven through their beans, because the
+     * redirect counter is registered on first use and the merge meters only exist once a merge has run.
      */
     private void registerEveryCataloguedMeter() {
         FeedResponse feed = create();
         stub.serve(PATH, 503, "text/plain", new byte[0]);
         ingestService.refresh(feed.id());
         PollTestHooks.runScheduledPoll(context);
+        triggerRedirectAndMergeMeters();
+    }
+
+    private void triggerRedirectAndMergeMeters() {
+        long redirected = insertFeed(REDIRECT_KEY, "http://redirect.example.test/old");
+        insertFeed(REDIRECT_KEY, "https://redirect.example.test/held");
+        redirectApplier.apply(redirected, REDIRECT_KEY, "http://redirect.example.test/old",
+                URI.create("https://redirect.example.test/new"));
+        redirectApplier.apply(redirected, REDIRECT_KEY, "https://redirect.example.test/new",
+                URI.create("https://redirect.example.test/held"));
+
+        MergeData data = new MergeData(jdbcClient);
+        long from = data.source("merge-from.example.test", null);
+        long into = data.source("merge-into.example.test", null);
+        merger.merge(from, into);
+    }
+
+    private long insertFeed(String sourceKey, String url) {
+        long sourceId = sources.findOrCreate(sourceKey, null).getId();
+        return inserter.insert(new NewFeed(sourceId, "F", url, null, null, Topic.TECH, null)).orElseThrow();
     }
 
     @Test

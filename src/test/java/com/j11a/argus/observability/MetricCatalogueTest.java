@@ -67,7 +67,9 @@ class MetricCatalogueTest {
                 MetricNames.FETCH, MetricNames.INGEST, MetricNames.FETCH_SIZE, MetricNames.INGEST_ENTRIES,
                 MetricNames.PARSE_MISSING, MetricNames.POLL, MetricNames.FETCH_RETRY, MetricNames.SCHEDULED_JOB,
                 MetricNames.FEED_STATE, MetricNames.FEED_CONSECUTIVE_FAILURES, MetricNames.FEED_SINCE_LAST_SUCCESS,
-                MetricNames.POLL_LAST_SUCCESS, MetricNames.INGEST_LINK_FALLBACK, MetricNames.INGEST_LOCK_WAIT);
+                MetricNames.POLL_LAST_SUCCESS, MetricNames.INGEST_LINK_FALLBACK, MetricNames.INGEST_LOCK_WAIT,
+                MetricNames.FEED_REDIRECT, MetricNames.FEED_IDENTITY_CONFLICT, MetricNames.SOURCE_MERGE,
+                MetricNames.ARTICLE_COLLAPSED);
         assertThat(MetricCatalogue.all()).filteredOn(spec -> spec.name().equals(MetricNames.FETCH_SIZE))
                 .singleElement().satisfies(spec -> assertThat(spec.prometheusBase())
                         .isEqualTo("argus_fetch_size_bytes"));
@@ -94,5 +96,34 @@ class MetricCatalogueTest {
                     assertThat(spec.tags()).containsExactly(MetricNames.Tags.SOURCE);
                     assertThat(spec.prometheusBase()).isEqualTo("argus_ingest_lock_wait_seconds");
                 });
+    }
+
+    @Test
+    void cataloguesPhaseFiveIdentityAndMergeMeters() {
+        assertThat(specNamed(MetricNames.FEED_REDIRECT)).satisfies(spec -> {
+            assertThat(spec.kind()).isEqualTo(MeterKind.COUNTER);
+            assertThat(spec.baseUnit()).isNull();
+            assertThat(spec.tags()).containsExactlyInAnyOrder(MetricNames.Tags.SOURCE, MetricNames.Tags.OUTCOME);
+            assertThat(spec.prometheusSeries()).containsExactly("argus_feed_redirect_total");
+        });
+        assertThat(specNamed(MetricNames.FEED_IDENTITY_CONFLICT)).satisfies(spec -> {
+            assertThat(spec.kind()).isEqualTo(MeterKind.COUNTER);
+            assertThat(spec.tags()).containsExactly(MetricNames.Tags.KIND);
+            assertThat(spec.prometheusSeries()).containsExactly("argus_feed_identity_conflict_total");
+        });
+        assertThat(specNamed(MetricNames.SOURCE_MERGE)).satisfies(spec -> {
+            assertThat(spec.kind()).isEqualTo(MeterKind.TIMER);
+            assertThat(spec.tags()).containsExactlyInAnyOrder(MetricNames.Tags.TYPE, MetricNames.Tags.OUTCOME);
+            assertThat(spec.prometheusBase()).isEqualTo("argus_source_merge_seconds");
+        });
+        assertThat(specNamed(MetricNames.ARTICLE_COLLAPSED)).satisfies(spec -> {
+            assertThat(spec.kind()).isEqualTo(MeterKind.COUNTER);
+            assertThat(spec.tags()).containsExactly(MetricNames.Tags.TYPE);
+            assertThat(spec.prometheusSeries()).containsExactly("argus_article_collapsed_total");
+        });
+    }
+
+    private static MeterSpec specNamed(String name) {
+        return MetricCatalogue.all().stream().filter(spec -> spec.name().equals(name)).findFirst().orElseThrow();
     }
 }
