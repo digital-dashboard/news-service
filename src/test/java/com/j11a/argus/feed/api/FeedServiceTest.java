@@ -3,12 +3,9 @@ package com.j11a.argus.feed.api;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.RETURNS_SELF;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -23,6 +20,9 @@ import com.j11a.argus.feed.Topic;
 import com.j11a.argus.feed.fetch.FetchValidators;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
+import com.j11a.argus.feed.identity.FeedIdentityRegistry;
+import com.j11a.argus.feed.identity.FeedIdentityTelemetry;
+import com.j11a.argus.feed.identity.IdentityKind;
 import com.j11a.argus.feed.parse.ParsedFeed;
 import com.j11a.argus.feed.poll.PollProperties;
 import com.j11a.argus.ingest.FailureReasons;
@@ -30,7 +30,6 @@ import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.FeedLoader;
 import com.j11a.argus.ingest.IngestTelemetry;
 import com.j11a.argus.source.Source;
-import com.j11a.argus.source.SourceLock;
 import com.j11a.argus.source.SourceService;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
@@ -40,14 +39,13 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
-import org.springframework.jdbc.core.simple.JdbcClient;
 
 class FeedServiceTest {
 
@@ -58,31 +56,40 @@ class FeedServiceTest {
     private final FeedInserter inserter = mock(FeedInserter.class);
     private final SourceService sources = mock(SourceService.class);
     private final FeedLoader loader = mock(FeedLoader.class);
+    private final FeedIdentityRegistry registry = mock(FeedIdentityRegistry.class);
+    private final FeedIdentityTelemetry identityTelemetry = mock(FeedIdentityTelemetry.class);
+    private final FeedUpdater updater = mock(FeedUpdater.class);
+    private final FeedRemover remover = mock(FeedRemover.class);
     private final FeedIngestService ingest = mock(FeedIngestService.class);
     private final FeedHealthUpdater healthUpdater = mock(FeedHealthUpdater.class);
     private final FeedHealthGauges healthGauges = mock(FeedHealthGauges.class);
     private final PollProperties properties = new PollProperties("0 */15 * * * *", 8, 3);
-    private final JdbcClient jdbc = mock(JdbcClient.class);
     private final IngestTelemetry.CreateFetchTimer timer = mock(IngestTelemetry.CreateFetchTimer.class);
     private final Clock clock = Clock.fixed(FETCHED_AT, ZoneOffset.UTC);
-    private final SourceLock sourceLock = mock(SourceLock.class);
-    private final FeedService service = new FeedService(feeds, inserter, sources, loader, ingest,
-            healthUpdater, healthGauges, properties, jdbc, clock, sourceLock);
+    private final FeedService service = new FeedService(feeds, inserter, sources, new FeedProbe(loader),
+            new FeedUrlChecks(registry, identityTelemetry), registry, updater, remover, ingest, healthUpdater,
+            healthGauges, properties, clock);
 
     @BeforeEach
     void stubSource() {
         Source source = mock(Source.class);
         when(source.getId()).thenReturn(3L);
         when(source.getKey()).thenReturn("example.test");
-        when(sources.findOrCreate(anyString(), any())).thenReturn(source);
-        when(inserter.findIdByUrl(URL)).thenReturn(Optional.empty());
+        when(sources.resolveAutomatic(any(), any(), any(URI.class))).thenReturn(source);
         when(loader.startCreateFetch()).thenReturn(timer);
+        when(registry.withIdentityLock(any())).thenAnswer(invocation -> {
+            Supplier<?> work = invocation.getArgument(0);
+            return work.get();
+        });
     }
 
     private void loads(String title, String language) {
-        ParsedFeed parsed = new ParsedFeed(title, "https://example.test/", null, language, List.of());
+        loads(new ParsedFeed(title, "https://example.test/", null, language, List.of()), URI.create(URL));
+    }
+
+    private void loads(ParsedFeed parsed, URI finalUrl) {
         when(loader.loadForCreate(any(URI.class), eq(timer))).thenReturn(
-                new FeedLoader.CreateLoaded.Created(parsed, FETCHED_AT, FetchValidators.EMPTY, 100));
+                new FeedLoader.CreateLoaded.Created(parsed, FETCHED_AT, FetchValidators.EMPTY, 100, finalUrl));
     }
 
     private static Feed storedFeed() {
@@ -103,24 +110,75 @@ class FeedServiceTest {
     void aRowInsertedBetweenTheCheckAndTheInsertGives409WithTheWinnersId() {
         loads("Example", null);
         when(inserter.insert(any())).thenReturn(Optional.empty());
-        when(inserter.findIdByUrl(URL)).thenReturn(Optional.empty(), Optional.of(77L));
+        when(registry.findConflict(any(), isNull())).thenReturn(Optional.empty(), Optional.empty(),
+                Optional.of(new FeedIdentityRegistry.Conflict(IdentityKind.ENTERED, 77L)));
 
         assertThatThrownBy(() -> service.create(request()))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
                     assertThat(e.code()).isEqualTo(ErrorCode.FEED_URL_CONFLICT);
-                    assertThat(e.properties()).containsEntry("existingFeedId", 77L);
+                    assertThat(e.properties()).containsEntry("existingFeedId", 77L).containsEntry("kind", "entered");
                 });
         verifyNoInteractions(ingest);
     }
 
     @Test
-    void anExistingUrlIsRejectedBeforeAnyDownload() {
-        when(inserter.findIdByUrl(URL)).thenReturn(Optional.of(5L));
+    void anEnteredUrlThatNamesAnExistingFeedIsRejectedBeforeAnyDownload() {
+        when(registry.findConflict(any(), isNull()))
+                .thenReturn(Optional.of(new FeedIdentityRegistry.Conflict(IdentityKind.ENTERED, 5L)));
 
         assertThatThrownBy(() -> service.create(request()))
-                .isInstanceOfSatisfying(ApiException.class,
-                        e -> assertThat(e.properties()).containsEntry("existingFeedId", 5L));
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.properties()).containsEntry("existingFeedId", 5L).containsEntry("kind", "entered");
+                });
         verifyNoInteractions(loader);
+        verify(identityTelemetry).conflict(IdentityKind.ENTERED);
+    }
+
+    @Test
+    void theDownloadIsCheckedAsEnteredThenRedirectThenSelfLinkAndAConflictCountsItsKind() {
+        URI redirected = URI.create("https://new.example.test/rss.xml");
+        loads(new ParsedFeed("T", "https://example.test/", "https://example.test/self.xml", null, List.of()),
+                redirected);
+        when(registry.findConflict(any(), isNull())).thenReturn(Optional.empty(),
+                Optional.of(new FeedIdentityRegistry.Conflict(IdentityKind.REDIRECT, 8L)));
+
+        assertThatThrownBy(() -> service.create(request()))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.properties()).containsEntry("existingFeedId", 8L).containsEntry("kind", "redirect");
+                });
+
+        ArgumentCaptor<List<FeedIdentityRegistry.Candidate>> candidates = ArgumentCaptor.captor();
+        verify(registry, org.mockito.Mockito.times(2)).findConflict(candidates.capture(), isNull());
+        assertThat(candidates.getAllValues().getLast()).containsExactly(
+                new FeedIdentityRegistry.Candidate(IdentityKind.ENTERED, URL),
+                new FeedIdentityRegistry.Candidate(IdentityKind.REDIRECT, "https://new.example.test/rss.xml"),
+                new FeedIdentityRegistry.Candidate(IdentityKind.SELF_LINK, "https://example.test/self.xml"));
+        verify(identityTelemetry).conflict(IdentityKind.REDIRECT);
+        verify(inserter, never()).insert(any());
+        verify(sources, never()).resolveAutomatic(any(), any(), any());
+    }
+
+    @Test
+    void aFinalUrlAndSelfLinkEqualToTheEnteredUrlAreNotCheckedTwice() {
+        loads(new ParsedFeed("T", "https://example.test/", URL, null, List.of()), URI.create(URL));
+        insertedFeedFor(request());
+
+        ArgumentCaptor<List<FeedIdentityRegistry.Candidate>> candidates = ArgumentCaptor.captor();
+        verify(registry, org.mockito.Mockito.times(2)).findConflict(candidates.capture(), isNull());
+        assertThat(candidates.getAllValues().getLast())
+                .containsExactly(new FeedIdentityRegistry.Candidate(IdentityKind.ENTERED, URL));
+    }
+
+    @Test
+    void theCleanedSelfLinkIsStoredAndTheSourceIsResolvedFromTheSiteAndSelfLinks() {
+        loads(new ParsedFeed("T", "https://example.test/", "HTTPS://Example.test/self.xml#frag", null, List.of()),
+                URI.create(URL));
+
+        NewFeed inserted = insertedFeedFor(request());
+
+        assertThat(inserted.selfUrl()).isEqualTo("https://example.test/self.xml");
+        verify(sources).resolveAutomatic("https://example.test/", "HTTPS://Example.test/self.xml#frag",
+                URI.create(URL));
     }
 
     @Test
@@ -152,7 +210,7 @@ class FeedServiceTest {
         verify(inserter).insert(inserted.capture());
         assertThat(inserted.getValue().sourceId()).isEqualTo(42L);
         verify(timer).completed("explicit.test", 100);
-        verify(sources, never()).findOrCreate(any(), any());
+        verify(sources, never()).resolveAutomatic(any(), any(), any());
     }
 
     @Test
@@ -206,7 +264,7 @@ class FeedServiceTest {
         assertThatThrownBy(() -> service.create(request))
                 .isInstanceOfSatisfying(ApiException.class,
                         e -> assertThat(e.code()).isEqualTo(ErrorCode.BAD_REQUEST));
-        verifyNoInteractions(inserter, loader);
+        verifyNoInteractions(inserter, loader, registry);
     }
 
     @Test
@@ -292,67 +350,22 @@ class FeedServiceTest {
         assertThat(page.getContent().getFirst().id()).isEqualTo(9L);
     }
 
-    private JdbcClient.StatementSpec statementUpdating(int rows) {
-        JdbcClient.StatementSpec spec = mock(JdbcClient.StatementSpec.class, RETURNS_SELF);
-        when(spec.update()).thenReturn(rows);
-        when(jdbc.sql(anyString())).thenReturn(spec);
-        return spec;
-    }
-
     @Test
-    void patchUpdatesEnabledStateWithOneStatementAndRefreshesGaugesAfterCommit() {
-        JdbcClient.StatementSpec update = statementUpdating(1);
+    void patchDelegatesToTheUpdaterAndReturnsTheStoredFeed() {
         Feed stored = storedFeed();
         when(feeds.findWithSourceById(9L)).thenReturn(Optional.of(stored));
+        PatchFeedRequest request = new PatchFeedRequest(false);
 
-        FeedResponse response = service.patch(9L, new PatchFeedRequest(false));
+        FeedResponse response = service.patch(9L, request);
 
-        verify(update).param("enabled", false);
-        verify(update).param("id", 9L);
-        verify(update).update();
-        verify(feeds, never()).save(any());
-        verify(healthGauges).refreshAfterCommit();
+        verify(updater).patch(9L, request);
         assertThat(response.id()).isEqualTo(9L);
     }
 
     @Test
-    void patchOfUnknownFeedThrowsNotFoundWithoutRefreshingGauges() {
-        statementUpdating(0);
-
-        assertThatThrownBy(() -> service.patch(404L, new PatchFeedRequest(false)))
-                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.FEED_NOT_FOUND));
-        verifyNoInteractions(healthGauges);
-    }
-
-    @Test
-    void deleteLocksTheSourceThenRemovesOwnedArticlesAndTheFeedAndRefreshesGaugesAfterCommit() {
-        JdbcClient.StatementSpec statement = statementUpdating(1);
-        stubSourceIdLookup(statement, Optional.of(4L));
-
+    void deleteDelegatesToTheRemover() {
         service.delete(9L);
 
-        InOrder order = inOrder(sourceLock, jdbc);
-        order.verify(sourceLock).acquire(4L);
-        order.verify(jdbc).sql(contains("DELETE FROM article a USING article_feed mine"));
-        order.verify(jdbc).sql("DELETE FROM feed WHERE id = :id");
-        verify(statement).param("feedId", 9L);
-        verify(healthGauges).refreshAfterCommit();
-    }
-
-    @Test
-    void deleteOfUnknownFeedThrowsNotFoundWithoutLockingOrRefreshingGauges() {
-        JdbcClient.StatementSpec statement = statementUpdating(0);
-        stubSourceIdLookup(statement, Optional.empty());
-
-        assertThatThrownBy(() -> service.delete(404L))
-                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.FEED_NOT_FOUND));
-        verifyNoInteractions(healthGauges, sourceLock);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static void stubSourceIdLookup(JdbcClient.StatementSpec statement, Optional<Long> sourceId) {
-        JdbcClient.MappedQuerySpec<Long> query = mock(JdbcClient.MappedQuerySpec.class);
-        when(statement.query(Long.class)).thenReturn(query);
-        when(query.optional()).thenReturn(sourceId);
+        verify(remover).delete(9L);
     }
 }

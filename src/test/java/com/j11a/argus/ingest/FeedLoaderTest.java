@@ -59,7 +59,34 @@ class FeedLoaderTest {
 
         FeedLoader.Loaded loaded = loader.load(URL, FetchValidators.EMPTY, SOURCE);
 
-        assertThat(loaded).isEqualTo(new FeedLoader.Loaded.Parsed(parsed, NOW, new FetchValidators("\"v1\"", null)));
+        assertThat(loaded).isEqualTo(new FeedLoader.Loaded.Parsed(parsed, NOW, new FetchValidators("\"v1\"", null), null));
+    }
+
+    @Test
+    void thePermanentTargetOfAFetchedFeedIsCarriedOnTheParsedResult() throws FeedParseException {
+        URI target = URI.create("https://new.example.test/rss.xml");
+        ParsedFeed parsed = new ParsedFeed("T", "https://example.test/", null, null, List.of());
+        when(retrying.fetch(URL, FetchValidators.EMPTY, SOURCE)).thenReturn(
+                new FetchResult.Fetched(BODY, "application/rss+xml", target, target, FetchValidators.EMPTY));
+        when(parser.parse(any(), any(), any())).thenReturn(parsed);
+
+        FeedLoader.Loaded loaded = loader.load(URL, FetchValidators.EMPTY, SOURCE);
+
+        assertThat(loaded).isEqualTo(new FeedLoader.Loaded.Parsed(parsed, NOW, FetchValidators.EMPTY, target));
+    }
+
+    @Test
+    void theCreateLoadCarriesTheFinalUrlOfTheDownload() throws FeedParseException {
+        URI finalUrl = URI.create("https://final.example.test/rss.xml");
+        ParsedFeed parsed = new ParsedFeed("T", "https://example.test/", null, null, List.of());
+        when(fetcher.fetch(URL)).thenReturn(
+                new FetchResult.Fetched(BODY, "application/rss+xml", finalUrl, null, FetchValidators.EMPTY));
+        when(parser.parse(any(), any(), any())).thenReturn(parsed);
+
+        FeedLoader.CreateLoaded loaded = loader.loadForCreate(URL, loader.startCreateFetch());
+
+        assertThat(loaded).isEqualTo(new FeedLoader.CreateLoaded.Created(
+                parsed, NOW, FetchValidators.EMPTY, BODY.length, finalUrl));
     }
 
     @Test
@@ -93,7 +120,7 @@ class FeedLoaderTest {
         FeedLoader.CreateLoaded loaded = loader.loadForCreate(URL, timer);
 
         assertThat(loaded).isEqualTo(new FeedLoader.CreateLoaded.Created(parsed, NOW,
-                new FetchValidators("\"v1\"", null), BODY.length));
+                new FetchValidators("\"v1\"", null), BODY.length, URL));
         assertThat(createFetchTimers("unknown", "fetched")).isZero();
         timer.completed(SOURCE, BODY.length);
         assertThat(createFetchTimers(SOURCE, "fetched")).isEqualTo(1);

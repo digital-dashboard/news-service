@@ -361,18 +361,94 @@ class FeedControllerTest {
         verifyNoInteractions(feeds);
     }
 
-    @Test
-    void patchNullOrEmptyBodyIs400() throws Exception {
-        mockMvc.perform(patch(FEEDS + "/42").header(AdminKeys.HEADER, AdminKeys.VALID)
-                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    private static MockHttpServletRequestBuilder adminPatch(String path, String body) {
+        return patch(path).header(AdminKeys.HEADER, AdminKeys.VALID).contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
 
-        mockMvc.perform(patch(FEEDS + "/42").header(AdminKeys.HEADER, AdminKeys.VALID)
-                        .contentType(MediaType.APPLICATION_JSON).content(""))
+    @Test
+    void patchWithAnEmptyObjectIs400ValidationFailedFromTheService() throws Exception {
+        when(feeds.patch(eq(42L), any())).thenThrow(
+                ApiException.validationFailed("request", "at least one field must be provided"));
+
+        mockMvc.perform(adminPatch(FEEDS + "/42", "{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[0].message").value("at least one field must be provided"));
+    }
+
+    @Test
+    void patchWithAnUnreadableBodyIs400() throws Exception {
+        mockMvc.perform(adminPatch(FEEDS + "/42", ""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
         verifyNoInteractions(feeds);
+    }
+
+    @Test
+    void patchWithBadFieldsIs400AndNamesEachOne() throws Exception {
+        mockMvc.perform(adminPatch(FEEDS + "/42",
+                        "{\"name\":\"\",\"sourceId\":0,\"url\":\"ftp://example.test/rss.xml\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[?(@.field=='name')]").isNotEmpty())
+                .andExpect(jsonPath("$.errors[?(@.field=='sourceId')]").isNotEmpty())
+                .andExpect(jsonPath("$.errors[?(@.field=='url')]").isNotEmpty());
+        verifyNoInteractions(feeds);
+    }
+
+    @Test
+    void patchWithAnUnknownTopicIs400() throws Exception {
+        mockMvc.perform(adminPatch(FEEDS + "/42", "{\"topic\":\"NOT_A_TOPIC\"}"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(feeds);
+    }
+
+    @Test
+    void patchBindsEveryField() throws Exception {
+        when(feeds.patch(eq(42L), any())).thenReturn(feed(42));
+
+        mockMvc.perform(adminPatch(FEEDS + "/42", "{\"enabled\":false,\"name\":\"New\",\"topic\":\"TECH\","
+                        + "\"sourceId\":7,\"url\":\"https://example.test/new.xml\"}"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<PatchFeedRequest> captor = ArgumentCaptor.forClass(PatchFeedRequest.class);
+        verify(feeds).patch(eq(42L), captor.capture());
+        assertThat(captor.getValue()).isEqualTo(new PatchFeedRequest(
+                false, "New", Topic.TECH, 7L, "https://example.test/new.xml"));
+    }
+
+    @Test
+    void patchUrlConflictIs409WithTheExistingFeedIdAndKind() throws Exception {
+        when(feeds.patch(eq(42L), any())).thenThrow(new ApiException(ErrorCode.FEED_URL_CONFLICT,
+                "A feed with this URL already exists.", Map.of("existingFeedId", 9L, "kind", "redirect")));
+
+        mockMvc.perform(adminPatch(FEEDS + "/42", "{\"url\":\"https://example.test/new.xml\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("FEED_URL_CONFLICT"))
+                .andExpect(jsonPath("$.existingFeedId").value(9))
+                .andExpect(jsonPath("$.kind").value("redirect"));
+    }
+
+    @Test
+    void patchUnreadableFeedAtTheNewUrlIs422() throws Exception {
+        when(feeds.patch(eq(42L), any())).thenThrow(new ApiException(ErrorCode.FEED_INVALID,
+                "The URL did not return a readable feed.", Map.of("reason", "not_a_feed")));
+
+        mockMvc.perform(adminPatch(FEEDS + "/42", "{\"url\":\"https://example.test/new.xml\"}"))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.code").value("FEED_INVALID"))
+                .andExpect(jsonPath("$.reason").value("not_a_feed"));
+    }
+
+    @Test
+    void patchToAnUnknownSourceIs404() throws Exception {
+        when(feeds.patch(eq(42L), any())).thenThrow(
+                new ApiException(ErrorCode.SOURCE_NOT_FOUND, "Source 7 does not exist."));
+
+        mockMvc.perform(adminPatch(FEEDS + "/42", "{\"sourceId\":7}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("SOURCE_NOT_FOUND"));
     }
 
     @Test

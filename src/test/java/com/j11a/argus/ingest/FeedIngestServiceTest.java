@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -19,9 +21,13 @@ import com.j11a.argus.feed.fetch.FetchValidators;
 import com.j11a.argus.feed.health.FailingThreshold;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
+import com.j11a.argus.feed.identity.FeedIdentityRegistry;
+import com.j11a.argus.feed.identity.FeedRedirectApplier;
+import com.j11a.argus.feed.identity.FeedRedirectApplier.RedirectOutcome;
 import com.j11a.argus.feed.parse.ParsedEntry;
 import com.j11a.argus.feed.parse.ParsedFeed;
 import com.j11a.argus.observability.MetricNames;
+import com.j11a.argus.source.FeedSourceChangedException;
 import com.j11a.argus.source.Source;
 import com.j11a.argus.testsupport.LogCapture;
 import com.j11a.argus.web.error.ApiException;
@@ -53,6 +59,8 @@ class FeedIngestServiceTest {
     private final FeedLoader loader = mock(FeedLoader.class);
     private final FeedHealthUpdater healthUpdater = mock(FeedHealthUpdater.class);
     private final FeedHealthGauges healthGauges = mock(FeedHealthGauges.class);
+    private final FeedRedirectApplier redirectApplier = mock(FeedRedirectApplier.class);
+    private final FeedIdentityRegistry identityRegistry = mock(FeedIdentityRegistry.class);
     private final Clock clock = Clock.fixed(FETCHED_AT, ZoneOffset.UTC);
     private final Feed feed = mock(Feed.class);
     private FeedIngestService service;
@@ -71,7 +79,7 @@ class FeedIngestServiceTest {
 
         IngestTelemetry telemetry = new IngestTelemetry(ObservationRegistry.create(), registry, Tracer.NOOP);
         service = new FeedIngestService(feedRepository, loader, persister, telemetry,
-                healthUpdater, healthGauges, new FailingThreshold(3), clock);
+                healthUpdater, healthGauges, new FailingThreshold(3), redirectApplier, identityRegistry, clock);
     }
 
     private static ParsedFeed oneEntryWithNothingOptional() {
@@ -138,7 +146,7 @@ class FeedIngestServiceTest {
         FetchValidators newValidators = new FetchValidators("\"etag2\"", "Thu, 22 Oct 2026 07:28:00 GMT");
         ParsedFeed parsed = oneEntryWithNothingOptional();
         when(loader.load(URI.create("https://example.test/rss.xml"), validators, "example.test"))
-                .thenReturn(new FeedLoader.Loaded.Parsed(parsed, FETCHED_AT, newValidators));
+                .thenReturn(new FeedLoader.Loaded.Parsed(parsed, FETCHED_AT, newValidators, null));
         when(persister.persist(any(), any(), any())).thenReturn(
                 new PersistCounts(1, Map.of(), 0, 0, Map.of(), Map.of()));
 
@@ -200,7 +208,7 @@ class FeedIngestServiceTest {
     @Test
     void aFailedPersistRecordsPersistFailedAndPropagates() {
         when(loader.load(FEED_URI, STORED, "example.test"))
-                .thenReturn(new FeedLoader.Loaded.Parsed(oneEntryWithNothingOptional(), FETCHED_AT, STORED));
+                .thenReturn(new FeedLoader.Loaded.Parsed(oneEntryWithNothingOptional(), FETCHED_AT, STORED, null));
         when(persister.persist(any(), any(), any())).thenThrow(new IllegalStateException("db down"));
         when(healthUpdater.recordFailure(anyLong(), any(), any())).thenReturn(1);
 
@@ -212,7 +220,7 @@ class FeedIngestServiceTest {
     @Test
     void aPersistFailureOfAFeedDeletedMeanwhileIsNotLoggedAndKeepsTheOriginalException() {
         when(loader.load(FEED_URI, STORED, "example.test"))
-                .thenReturn(new FeedLoader.Loaded.Parsed(oneEntryWithNothingOptional(), FETCHED_AT, STORED));
+                .thenReturn(new FeedLoader.Loaded.Parsed(oneEntryWithNothingOptional(), FETCHED_AT, STORED, null));
         when(persister.persist(any(), any(), any())).thenThrow(new IllegalStateException("foreign key violation"));
         when(healthUpdater.recordFailure(anyLong(), any(), any())).thenReturn(0);
 
@@ -260,7 +268,7 @@ class FeedIngestServiceTest {
     @Test
     void aPersistFailureNeverLogsTheExceptionTextBecauseItQuotesTheArticleRow() {
         when(loader.load(FEED_URI, STORED, "example.test"))
-                .thenReturn(new FeedLoader.Loaded.Parsed(oneEntryWithNothingOptional(), FETCHED_AT, STORED));
+                .thenReturn(new FeedLoader.Loaded.Parsed(oneEntryWithNothingOptional(), FETCHED_AT, STORED, null));
         IllegalStateException constraint = new IllegalStateException("wrapper",
                 new IllegalStateException("Key (guid)=(GUID-SECRET) link https://news.test/a?t=LINK-SECRET exists"));
         when(persister.persist(any(), any(), any())).thenThrow(constraint);
@@ -282,7 +290,7 @@ class FeedIngestServiceTest {
     @Test
     void aFailedPersistAtTheThresholdLogsTheFailureErrorAndTheCrossingErrorOnly() {
         when(loader.load(FEED_URI, STORED, "example.test"))
-                .thenReturn(new FeedLoader.Loaded.Parsed(oneEntryWithNothingOptional(), FETCHED_AT, STORED));
+                .thenReturn(new FeedLoader.Loaded.Parsed(oneEntryWithNothingOptional(), FETCHED_AT, STORED, null));
         when(persister.persist(any(), any(), any())).thenThrow(new IllegalStateException("db down"));
         when(healthUpdater.recordFailure(anyLong(), any(), any())).thenReturn(3);
 
@@ -352,5 +360,162 @@ class FeedIngestServiceTest {
             assertThat(logs.at(Level.WARN)).singleElement().satisfies(event ->
                     assertThat(event.getFormattedMessage()).endsWith(": io ConnectException; 1 consecutive failures"));
         }
+    }
+
+    private static final URI TARGET = URI.create("https://new.example.test/rss.xml");
+    private static final String STORED_URL = "https://example.test/rss.xml";
+
+    private void loadsParsedWithPermanentTarget(URI target) {
+        when(loader.load(FEED_URI, STORED, "example.test")).thenReturn(
+                new FeedLoader.Loaded.Parsed(oneEntryWithNothingOptional(), FETCHED_AT, STORED, target));
+    }
+
+    private static PersistCounts noCounts() {
+        return new PersistCounts(1, Map.of(), 0, 0, Map.of(), Map.of());
+    }
+
+    @Test
+    void aRedirectOntoAnotherFeedEndsTheIngestWithoutPersistingOrCountingAFailure() {
+        loadsParsedWithPermanentTarget(TARGET);
+        when(redirectApplier.apply(1L, "example.test", STORED_URL, TARGET))
+                .thenReturn(new RedirectOutcome.Conflict(7L));
+
+        IngestReport report = service.refresh(1L);
+
+        assertThat(report.outcome()).isEqualTo(IngestReport.Outcome.FAILED);
+        assertThat(report.failureReason()).isEqualTo(FailureReasons.DUPLICATE_FEED);
+        verifyNoInteractions(persister, identityRegistry);
+        verify(healthUpdater, never()).recordFailure(anyLong(), any(), any());
+        verify(healthUpdater, never()).recordSuccess(anyLong(), any(), any());
+        verify(healthGauges).refreshAfterCommit();
+    }
+
+    @Test
+    void aNotModifiedAnswerReachedThroughAPermanentRedirectAppliesItAndRecordsNotModified() {
+        when(loader.load(FEED_URI, STORED, "example.test")).thenReturn(new FeedLoader.Loaded.NotModified(
+                new FetchResult.NotModified(TARGET, TARGET, STORED)));
+        when(redirectApplier.apply(1L, "example.test", STORED_URL, TARGET))
+                .thenReturn(new RedirectOutcome.Applied(TARGET.toString()));
+
+        IngestReport report = service.refresh(1L);
+
+        assertThat(report.outcome()).isEqualTo(IngestReport.Outcome.NOT_MODIFIED);
+        verify(redirectApplier).apply(1L, "example.test", STORED_URL, TARGET);
+        verify(healthUpdater).recordNotModified(1L, STORED, FETCHED_AT);
+    }
+
+    @Test
+    void aNotModifiedAnswerThatRedirectsOntoAnotherFeedDoesNotRecordNotModified() {
+        when(loader.load(FEED_URI, STORED, "example.test")).thenReturn(new FeedLoader.Loaded.NotModified(
+                new FetchResult.NotModified(TARGET, TARGET, STORED)));
+        when(redirectApplier.apply(1L, "example.test", STORED_URL, TARGET))
+                .thenReturn(new RedirectOutcome.Conflict(7L));
+
+        IngestReport report = service.refresh(1L);
+
+        assertThat(report.failureReason()).isEqualTo(FailureReasons.DUPLICATE_FEED);
+        verifyNoInteractions(healthUpdater);
+    }
+
+    @Test
+    void anAppliedRedirectIsFollowedByTheNormalPersist() {
+        loadsParsedWithPermanentTarget(TARGET);
+        when(redirectApplier.apply(1L, "example.test", STORED_URL, TARGET))
+                .thenReturn(new RedirectOutcome.Applied(TARGET.toString()));
+        when(persister.persist(any(), any(), any())).thenReturn(noCounts());
+
+        IngestReport report = service.refresh(1L);
+
+        assertThat(report.outcome()).isEqualTo(IngestReport.Outcome.COMPLETED);
+        verify(healthUpdater).recordSuccess(1L, STORED, FETCHED_AT);
+    }
+
+    @Test
+    void aFetchWithoutAPermanentTargetNeverAsksTheApplier() {
+        loadsParsedWithPermanentTarget(null);
+        when(persister.persist(any(), any(), any())).thenReturn(noCounts());
+
+        service.refresh(1L);
+
+        verifyNoInteractions(redirectApplier);
+    }
+
+    @Test
+    void theSelfLinkIsRecordedAfterASuccessfulPersist() {
+        ParsedFeed parsed = new ParsedFeed("Example", "https://example.test/", "https://example.test/self.xml", null,
+                List.of());
+        when(loader.load(FEED_URI, STORED, "example.test"))
+                .thenReturn(new FeedLoader.Loaded.Parsed(parsed, FETCHED_AT, STORED, null));
+        when(persister.persist(any(), any(), any())).thenReturn(
+                new PersistCounts(0, Map.of(), 0, 0, Map.of(), Map.of()));
+
+        service.refresh(1L);
+
+        verify(identityRegistry).recordSelfUrl(1L, "https://example.test/self.xml");
+    }
+
+    @Test
+    void aFailureRecordingTheSelfLinkIsAWarnAndDoesNotFailTheIngest() {
+        loadsParsedWithPermanentTarget(null);
+        when(persister.persist(any(), any(), any())).thenReturn(noCounts());
+        doThrow(new IllegalStateException("db down")).when(identityRegistry).recordSelfUrl(anyLong(), any());
+
+        try (LogCapture logs = LogCapture.start()) {
+            IngestReport report = service.refresh(1L);
+
+            assertThat(report.outcome()).isEqualTo(IngestReport.Outcome.COMPLETED);
+            assertThat(logs.at(Level.WARN)).singleElement().satisfies(event ->
+                    assertThat(LogCapture.keyValues(event)).containsEntry("feedId", 1L));
+        }
+        verify(healthUpdater, never()).recordFailure(anyLong(), any(), any());
+    }
+
+    @Test
+    void aPersistThatFindsTheFeedInAnotherSourceIsRetriedOnceWithTheFeedReRead() {
+        Feed moved = mock(Feed.class);
+        Source newSource = mock(Source.class);
+        when(newSource.getId()).thenReturn(9L);
+        when(newSource.getKey()).thenReturn("new.test");
+        when(moved.getId()).thenReturn(1L);
+        when(moved.getSource()).thenReturn(newSource);
+        when(feedRepository.findWithSourceById(1L)).thenReturn(Optional.of(feed), Optional.of(moved));
+        loadsParsedWithPermanentTarget(null);
+        when(persister.persist(eq(feed), any(), any())).thenThrow(new FeedSourceChangedException(1L));
+        when(persister.persist(eq(moved), any(), any())).thenReturn(noCounts());
+
+        IngestReport report = service.refresh(1L);
+
+        assertThat(report.outcome()).isEqualTo(IngestReport.Outcome.COMPLETED);
+        verify(persister).persist(eq(moved), any(), any());
+        verify(healthUpdater).recordSuccess(1L, STORED, FETCHED_AT);
+        verify(healthUpdater, never()).recordFailure(anyLong(), any(), any());
+    }
+
+    @Test
+    void aSecondSourceMismatchIsAWarnedSourceChangedReportWithNoHealthWrites() {
+        Feed moved = mock(Feed.class);
+        Source newSource = mock(Source.class);
+        when(newSource.getId()).thenReturn(9L);
+        when(newSource.getKey()).thenReturn("new.test");
+        when(moved.getId()).thenReturn(1L);
+        when(moved.getSource()).thenReturn(newSource);
+        when(feedRepository.findWithSourceById(1L)).thenReturn(Optional.of(feed), Optional.of(moved));
+        loadsParsedWithPermanentTarget(null);
+        when(persister.persist(any(), any(), any())).thenThrow(new FeedSourceChangedException(1L));
+
+        try (LogCapture logs = LogCapture.start()) {
+            IngestReport report = service.refresh(1L);
+
+            assertThat(report.outcome()).isEqualTo(IngestReport.Outcome.FAILED);
+            assertThat(report.failureReason()).isEqualTo(FailureReasons.SOURCE_CHANGED);
+            assertThat(logs.at(Level.WARN)).singleElement().satisfies(event ->
+                    assertThat(LogCapture.keyValues(event))
+                            .containsEntry("reason", FailureReasons.SOURCE_CHANGED)
+                            .containsEntry("sourceKey", "new.test"));
+        }
+        verify(healthUpdater, never()).recordFailure(anyLong(), any(), any());
+        verify(healthUpdater, never()).recordSuccess(anyLong(), any(), any());
+        verify(persister, org.mockito.Mockito.times(2)).persist(any(), any(), any());
+        verify(healthGauges).refreshAfterCommit();
     }
 }

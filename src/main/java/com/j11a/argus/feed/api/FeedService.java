@@ -4,21 +4,19 @@ import com.j11a.argus.feed.Feed;
 import com.j11a.argus.feed.FeedInserter;
 import com.j11a.argus.feed.FeedRepository;
 import com.j11a.argus.feed.NewFeed;
-import com.j11a.argus.feed.fetch.FetchError;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
+import com.j11a.argus.feed.identity.FeedIdentityRegistry;
+import com.j11a.argus.feed.identity.IdentityKind;
 import com.j11a.argus.feed.parse.ParsedFeed;
 import com.j11a.argus.feed.poll.PollProperties;
 import com.j11a.argus.ingest.FailureReasons;
 import com.j11a.argus.ingest.FeedIngestService;
 import com.j11a.argus.ingest.FeedLoader;
 import com.j11a.argus.ingest.IngestTelemetry;
-import com.j11a.argus.observability.LogFields;
 import com.j11a.argus.observability.LogKeys;
 import com.j11a.argus.security.AdminAccess;
 import com.j11a.argus.source.Source;
-import com.j11a.argus.source.SourceLock;
-import com.j11a.argus.source.SourceResolver;
 import com.j11a.argus.source.SourceService;
 import com.j11a.argus.url.HttpUrls;
 import com.j11a.argus.url.LogSafe;
@@ -27,16 +25,12 @@ import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
 import java.net.URI;
 import java.time.Clock;
-import java.time.ZoneOffset;
-import java.util.Map;
-import java.util.Optional;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,79 +38,106 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class FeedService {
 
-    private static final String INVALID_DETAIL = "The URL did not return a readable feed.";
+    /** The feed API's audit lines share one logger, whichever of its collaborators writes them. */
+    static final String AUDIT_LOGGER = "com.j11a.argus.feed.api.FeedService";
+    private static final String CREATION = "creation";
     /** feed.name is varchar(255). */
     static final int MAX_NAME_LENGTH = 255;
     /** feed.language is varchar(16). */
     static final int MAX_LANGUAGE_LENGTH = 16;
-    private static final String DELETE_OWNED_ARTICLES = """
-            DELETE FROM article a USING article_feed mine
-            WHERE mine.feed_id = :feedId AND mine.article_id = a.id
-              AND NOT EXISTS (SELECT 1 FROM article_feed o WHERE o.article_id = a.id AND o.feed_id <> :feedId)
-            """;
+
+    private record Placed(long feedId, Source source) {
+    }
 
     private final FeedRepository feeds;
     private final FeedInserter inserter;
     private final SourceService sources;
-    private final FeedLoader loader;
+    private final FeedProbe probe;
+    private final FeedUrlChecks urlChecks;
+    private final FeedIdentityRegistry registry;
+    private final FeedUpdater updater;
+    private final FeedRemover remover;
     private final FeedIngestService ingest;
     private final FeedHealthUpdater healthUpdater;
     private final FeedHealthGauges healthGauges;
     private final PollProperties properties;
-    private final JdbcClient jdbc;
     private final Clock clock;
-    private final SourceLock sourceLock;
 
-    public FeedService(FeedRepository feeds, FeedInserter inserter, SourceService sources, FeedLoader loader,
-            FeedIngestService ingest, FeedHealthUpdater healthUpdater,
-            FeedHealthGauges healthGauges, PollProperties properties, JdbcClient jdbc, Clock clock,
-            SourceLock sourceLock) {
+    public FeedService(FeedRepository feeds, FeedInserter inserter, SourceService sources, FeedProbe probe,
+            FeedUrlChecks urlChecks, FeedIdentityRegistry registry, FeedUpdater updater, FeedRemover remover,
+            FeedIngestService ingest, FeedHealthUpdater healthUpdater, FeedHealthGauges healthGauges,
+            PollProperties properties, Clock clock) {
         this.feeds = feeds;
         this.inserter = inserter;
         this.sources = sources;
-        this.loader = loader;
+        this.probe = probe;
+        this.urlChecks = urlChecks;
+        this.registry = registry;
+        this.updater = updater;
+        this.remover = remover;
         this.ingest = ingest;
         this.healthUpdater = healthUpdater;
         this.healthGauges = healthGauges;
         this.properties = properties;
-        this.jdbc = jdbc;
         this.clock = clock;
-        this.sourceLock = sourceLock;
     }
 
     /**
-     * Deliberately not transactional: the download must not hold a connection. The source upsert and the feed insert
-     * each commit on their own. Retries and conditional GET do not apply here: the create path makes one attempt.
+     * Deliberately not transactional: the download must not hold a connection. The entered URL is checked before the
+     * download as a fast fail; after it, the identity checks, the source resolution and the insert share one short
+     * transaction under the identity lock, so no other create or URL change can slip in between. Source resolution
+     * is a couple of indexed reads and at most one insert, so holding the lock across it is cheap, and a conflict
+     * rolls the new source back with it. Retries and conditional GET do not apply: the create path makes one attempt.
      */
     public FeedResponse create(CreateFeedRequest request) {
         String url = StoredUrls.clean(request.url());
         if (url == null) {
             throw new ApiException(ErrorCode.BAD_REQUEST, "The feed URL must be an absolute http or https URL.");
         }
-        inserter.findIdByUrl(url).ifPresent(existingId -> {
-            throw conflict(url, Optional.of(existingId));
-        });
+        urlChecks.requireFree(CREATION, List.of(FeedUrlChecks.entered(url)), null);
         Source explicitSource = request.sourceId() != null
                 ? sources.findById(request.sourceId())
                         .orElseThrow(() -> new ApiException(
                                 ErrorCode.SOURCE_NOT_FOUND, "Source " + request.sourceId() + " does not exist."))
                 : null;
         URI uri = URI.create(url);
-        IngestTelemetry.CreateFetchTimer timer = loader.startCreateFetch();
-        FeedLoader.CreateLoaded.Created loaded = download(uri, timer);
+        IngestTelemetry.CreateFetchTimer timer = probe.startTimer();
+        FeedLoader.CreateLoaded.Created loaded = probe.download(CREATION, uri, timer);
+        Placed placed = registry.withIdentityLock(() -> place(request, url, loaded, explicitSource, timer));
+        Feed feed = requireFeed(placed.feedId());
+        logCreated(feed, placed.source());
+        firstIngest(feed, loaded);
+        return toResponse(feed);
+    }
+
+    private Placed place(CreateFeedRequest request, String url, FeedLoader.CreateLoaded.Created loaded,
+            @Nullable Source explicitSource, IngestTelemetry.CreateFetchTimer timer) {
         ParsedFeed parsed = loaded.feed();
+        List<FeedIdentityRegistry.Candidate> candidates = FeedUrlChecks.candidates(
+                url, loaded.finalUrl(), parsed.selfLink());
+        urlChecks.requireFree(CREATION, candidates, null);
         Source source = explicitSource != null
                 ? explicitSource
-                : sources.findOrCreate(SourceResolver.keyFor(parsed.siteLink(), uri), parsed.siteLink());
+                : sources.resolveAutomatic(parsed.siteLink(), parsed.selfLink(), URI.create(url));
         timer.completed(source.getKey(), loaded.bodyLength());
-        long id = inserter.insert(new NewFeed(source.getId(), nameFor(request, parsed, source), url,
-                        StoredUrls.cleanPublic(parsed.siteLink()), null, request.topic(), languageOf(parsed)))
-                .orElseThrow(() -> conflict(url, inserter.findIdByUrl(url)));
-        Feed feed = requireFeed(id);
-        logCreated(feed, source);
+        NewFeed newFeed = new NewFeed(source.getId(), nameFor(request, parsed, source), url,
+                StoredUrls.cleanPublic(parsed.siteLink()), StoredUrls.clean(parsed.selfLink()), request.topic(),
+                languageOf(parsed));
+        long id = inserter.insert(newFeed).orElseThrow(() -> lostInsertRace(url, candidates));
+        return new Placed(id, source);
+    }
+
+    // The identity lock makes this nearly impossible; the unique indexes still decide if a writer ignored the lock.
+    private ApiException lostInsertRace(String url, List<FeedIdentityRegistry.Candidate> candidates) {
+        return registry.findConflict(candidates, null)
+                .map(conflict -> urlChecks.conflict(CREATION, url, conflict.kind(), conflict.existingFeedId()))
+                .orElseGet(() -> urlChecks.conflict(CREATION, url, IdentityKind.ENTERED, null));
+    }
+
+    private void firstIngest(Feed feed, FeedLoader.CreateLoaded.Created loaded) {
         // The feed is committed, so a failed first ingest must not turn a successful create into an error.
         try {
-            ingest.ingestParsed(feed, parsed, loaded.fetchedAt());
+            ingest.ingestParsed(feed, loaded.feed(), loaded.fetchedAt());
             healthUpdater.recordSuccess(feed.getId(), loaded.validators(), clock.instant());
         } catch (RuntimeException e) {
             log.atError()
@@ -129,7 +150,6 @@ public class FeedService {
         } finally {
             healthGauges.refreshAfterCommit();
         }
-        return toResponse(feed);
     }
 
     public FeedResponse get(long id) {
@@ -142,48 +162,15 @@ public class FeedService {
         return feeds.findAll(pageRequest).map(this::toResponse);
     }
 
-    /** One atomic UPDATE, so a health write that lands meanwhile is never reverted by a stale entity save. */
-    @Transactional
+    /** See FeedUpdater for the order of the steps and what a failure part-way leaves behind. */
     public FeedResponse patch(long id, PatchFeedRequest request) {
-        int updated = jdbc.sql("UPDATE feed SET enabled = :enabled, updated_at = :now WHERE id = :id")
-                .param("enabled", request.enabled())
-                .param("now", clock.instant().atOffset(ZoneOffset.UTC))
-                .param("id", id)
-                .update();
-        if (updated == 0) {
-            throw notFound(id);
-        }
-        healthGauges.refreshAfterCommit();
-        log.atInfo()
-                .setMessage(feedText(id, request.enabled() ? "enabled" : "disabled"))
-                .addKeyValue(LogKeys.FEED_ID, id)
-                .addKeyValue(LogKeys.ENABLED, request.enabled())
-                .log();
+        updater.patch(id, request);
         return toResponse(requireFeed(id));
     }
 
     /** Removes the feed and the articles only it linked to, in one transaction. The source row is kept. */
-    @Transactional
     public void delete(long id) {
-        Long sourceId = jdbc.sql("SELECT source_id FROM feed WHERE id = :id")
-                .param("id", id)
-                .query(Long.class)
-                .optional()
-                .orElseThrow(() -> notFound(id));
-        // Serialises with ingest so a delete cannot race an article_feed insert for the same source.
-        sourceLock.acquire(sourceId);
-        int removedArticles = jdbc.sql(DELETE_OWNED_ARTICLES).param("feedId", id).update();
-        int deleted = jdbc.sql("DELETE FROM feed WHERE id = :id").param("id", id).update();
-        if (deleted == 0) {
-            throw notFound(id);
-        }
-        healthGauges.refreshAfterCommit();
-        log.atInfo()
-                .setMessage(feedText(id, "deleted along with " + removedArticles + " articles"))
-                .addKeyValue(LogKeys.FEED_ID, id)
-                .addKeyValue(LogKeys.SOURCE_ID, sourceId)
-                .addKeyValue(LogKeys.ARTICLES_REMOVED, removedArticles)
-                .log();
+        remover.delete(id);
     }
 
     private Feed requireFeed(long id) {
@@ -194,31 +181,12 @@ public class FeedService {
         return FeedResponse.of(feed, AdminAccess.isAdmin(), properties.failingThreshold());
     }
 
-    private static ApiException notFound(long id) {
+    static ApiException notFound(long id) {
         return new ApiException(ErrorCode.FEED_NOT_FOUND, feedText(id, "does not exist."));
     }
 
-    private static String feedText(long id, String what) {
+    static String feedText(long id, String what) {
         return "Feed " + id + " " + what;
-    }
-
-    private FeedLoader.CreateLoaded.Created download(URI uri, IngestTelemetry.CreateFetchTimer timer) {
-        return switch (loader.loadForCreate(uri, timer)) {
-            case FeedLoader.CreateLoaded.Created created -> created;
-            case FeedLoader.CreateLoaded.Failed failed -> throw rejected(uri, failed);
-        };
-    }
-
-    private ApiException rejected(URI uri, FeedLoader.CreateLoaded.Failed failed) {
-        String url = HttpUrls.redact(uri.toString());
-        FetchError error = failed.error();
-        String detail = failed.reason() + (error != null ? " " + error.type() : "");
-        LoggingEventBuilder event = log.atWarn()
-                .setMessage("Feed creation rejected for " + url + ": " + detail)
-                .addKeyValue(LogKeys.URL, url)
-                .addKeyValue(LogKeys.REASON, failed.reason());
-        FetchError.addFields(event, error, failed.contentType(), failed.bodyBytes()).log();
-        return new ApiException(ErrorCode.FEED_INVALID, INVALID_DETAIL, Map.of("reason", failed.reason()));
     }
 
     private void logCreated(Feed feed, Source source) {
@@ -231,18 +199,6 @@ public class FeedService {
                 .addKeyValue(LogKeys.SOURCE_KEY, source.getKey())
                 .addKeyValue(LogKeys.URL, url)
                 .log();
-    }
-
-    private ApiException conflict(String url, Optional<Long> existingId) {
-        String redacted = HttpUrls.redact(url);
-        LoggingEventBuilder event = log.atInfo()
-                .setMessage("Feed creation conflicts with an existing feed for " + redacted)
-                .addKeyValue(LogKeys.URL, redacted);
-        LogFields.put(event, LogKeys.EXISTING_FEED_ID, existingId.orElse(null));
-        event.log();
-        Map<String, Object> problemProperties = existingId.<Map<String, Object>>map(id -> Map.of("existingFeedId", id))
-                .orElse(Map.of());
-        return new ApiException(ErrorCode.FEED_URL_CONFLICT, "A feed with this URL already exists.", problemProperties);
     }
 
     private static String nameFor(CreateFeedRequest request, ParsedFeed parsed, Source source) {
