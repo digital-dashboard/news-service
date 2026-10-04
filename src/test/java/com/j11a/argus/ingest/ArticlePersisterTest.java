@@ -1,6 +1,7 @@
 package com.j11a.argus.ingest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -9,6 +10,7 @@ import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.j11a.argus.feed.Feed;
@@ -18,6 +20,7 @@ import com.j11a.argus.ingest.dedup.EntryDedupResolver;
 import com.j11a.argus.ingest.dedup.ExistingArticleLookup;
 import com.j11a.argus.ingest.dedup.LinkFallback;
 import com.j11a.argus.ingest.dedup.Resolution;
+import com.j11a.argus.source.FeedSourceChangedException;
 import com.j11a.argus.source.Source;
 import com.j11a.argus.source.SourceLock;
 import java.time.Clock;
@@ -72,9 +75,15 @@ class ArticlePersisterTest {
     }
 
     private void stubHomepage(String url) {
+        stubQueries(url, 2L);
+    }
+
+    /** The homepage and the feed's current source id, as the persister reads them under the lock. */
+    private void stubQueries(String homepage, Long currentSourceId) {
         JdbcClient.StatementSpec spec = mock(JdbcClient.StatementSpec.class, RETURNS_SELF);
         when(jdbc.sql(anyString())).thenReturn(spec);
-        when(spec.query(String.class)).thenReturn(new MockMappedQuerySpec<>(url));
+        when(spec.query(String.class)).thenReturn(new MockMappedQuerySpec<>(homepage));
+        when(spec.query(Long.class)).thenReturn(new MockMappedQuerySpec<>(currentSourceId));
     }
 
     @Test
@@ -119,7 +128,8 @@ class ArticlePersisterTest {
 
         InOrder inOrder = inOrder(sourceLock, jdbc, resolver, applier);
         inOrder.verify(sourceLock).acquire(2L);
-        inOrder.verify(jdbc).sql(anyString());
+        inOrder.verify(jdbc).sql("SELECT source_id FROM feed WHERE id = :id");
+        inOrder.verify(jdbc).sql("SELECT homepage_url FROM source WHERE id = :id");
         inOrder.verify(resolver).resolve(any());
         inOrder.verify(applier).apply(2L, 1L, resolution, FETCHED_AT, NOW);
     }
@@ -140,6 +150,28 @@ class ArticlePersisterTest {
         ArgumentCaptor<DedupInput> inputCaptor = ArgumentCaptor.forClass(DedupInput.class);
         verify(resolver).resolve(inputCaptor.capture());
         assertThat(inputCaptor.getValue().homepageKey()).isNull();
+    }
+
+    @Test
+    void aFeedThatMovedToAnotherSourceBeforeTheLockWasTakenRollsBackWithoutWriting() {
+        stubQueries("https://example.test/home", 5L);
+
+        assertThatThrownBy(() -> persister.persist(feed, List.of(), FETCHED_AT))
+                .isInstanceOfSatisfying(FeedSourceChangedException.class, e -> assertThat(e).hasMessageContaining("1"));
+
+        verify(sourceLock).acquire(2L);
+        verifyNoInteractions(resolver, applier);
+    }
+
+    @Test
+    void aFeedDeletedBeforeTheLockWasTakenIsPersistedAsBeforeAndFailsOnItsForeignKey() {
+        stubQueries("https://example.test/home", null);
+        Resolution resolution = new Resolution(List.of(), Map.of());
+        when(resolver.resolve(any())).thenReturn(resolution);
+        PersistCounts counts = new PersistCounts(0, Map.of(), 0, 0, Map.of(), Map.of());
+        when(applier.apply(2L, 1L, resolution, FETCHED_AT, NOW)).thenReturn(counts);
+
+        assertThat(persister.persist(feed, List.of(), FETCHED_AT)).isEqualTo(counts);
     }
 
     private static class MockMappedQuerySpec<T> implements JdbcClient.MappedQuerySpec<T> {

@@ -5,8 +5,10 @@ import com.j11a.argus.feed.api.CreateFeedRequest;
 import com.j11a.argus.feed.api.FeedResponse;
 import com.j11a.argus.feed.api.FeedService;
 import com.j11a.argus.testsupport.FeedStubServer;
+import com.j11a.argus.testsupport.Fixtures;
 import com.j11a.argus.testsupport.IngestMeters;
 import com.j11a.argus.testsupport.ProbeController;
+import com.j11a.argus.testsupport.RssBody;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -60,9 +62,13 @@ public abstract class AbstractIntegrationTest {
         return jdbcClient.sql(sql).query(Long.class).single();
     }
 
-    /** Serves the fixture at path on the stub host and registers a feed for it, which also ingests it. */
+    /**
+     * Serves the fixture at path on the stub host, with a self link of its own so that several feeds can share one
+     * fixture, and registers a feed for it, which also ingests it.
+     */
     protected FeedResponse createFeedFrom(String path, String fixture, Topic topic) {
-        stub.serveFixture(path, fixture);
+        stub.serve(path, 200, RssBody.CONTENT_TYPE,
+                RssBody.withSelfLink(Fixtures.feed(fixture), stub.baseUrl() + path));
         return feedService.create(new CreateFeedRequest(stub.baseUrl() + path, null, topic, null));
     }
 }

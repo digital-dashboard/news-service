@@ -24,7 +24,9 @@ public class FeedLoader {
 
     public sealed interface Loaded {
 
-        record Parsed(ParsedFeed feed, Instant fetchedAt, FetchValidators validators) implements Loaded {
+        /** permanentTarget is where an unbroken 301/308 chain from the stored URL ended, if it did. */
+        record Parsed(ParsedFeed feed, Instant fetchedAt, FetchValidators validators, @Nullable URI permanentTarget)
+                implements Loaded {
         }
 
         record NotModified(FetchResult.NotModified notModified) implements Loaded {
@@ -46,7 +48,8 @@ public class FeedLoader {
     /** The result of the first download on the create path, which has no stored feed, source or validators yet. */
     public sealed interface CreateLoaded {
 
-        record Created(ParsedFeed feed, Instant fetchedAt, FetchValidators validators, int bodyLength)
+        /** finalUrl is where the download ended, after any redirects. */
+        record Created(ParsedFeed feed, Instant fetchedAt, FetchValidators validators, int bodyLength, URI finalUrl)
                 implements CreateLoaded {
         }
 
@@ -100,7 +103,8 @@ public class FeedLoader {
     private CreateLoaded parseForCreate(FetchResult.Fetched fetched, IngestTelemetry.CreateFetchTimer timer) {
         try {
             ParsedFeed feed = telemetry.span(PARSE_SPAN, () -> parse(fetched));
-            return new CreateLoaded.Created(feed, clock.instant(), fetched.validators(), fetched.body().length);
+            return new CreateLoaded.Created(feed, clock.instant(), fetched.validators(), fetched.body().length,
+                    fetched.finalUrl());
         } catch (ParseFailure e) {
             timer.parseFailed();
             return new CreateLoaded.Failed(e.reason, e.error, e.contentType, e.bodyBytes);
@@ -110,7 +114,7 @@ public class FeedLoader {
     private Loaded parseFetched(FetchResult.Fetched fetched, Instant fetchedAt) {
         try {
             ParsedFeed feed = telemetry.span(PARSE_SPAN, () -> parse(fetched));
-            return new Loaded.Parsed(feed, fetchedAt, fetched.validators());
+            return new Loaded.Parsed(feed, fetchedAt, fetched.validators(), fetched.permanentTarget());
         } catch (ParseFailure e) {
             return new Loaded.Failed(e.reason, null, e.error, e.contentType, e.bodyBytes);
         }

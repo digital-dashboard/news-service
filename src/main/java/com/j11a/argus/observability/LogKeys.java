@@ -44,6 +44,7 @@ public final class LogKeys {
     public static final String LINKS_FOLDED = "linksFolded";
     public static final String SOURCE_DELETED = "sourceDeleted";
     public static final String NEW_URL = "newUrl";
+    public static final String NEW_TOPIC = "newTopic";
     public static final String KIND = "kind";
 
     private LogKeys() {

@@ -14,6 +14,7 @@ import com.j11a.argus.feed.health.FeedHealthUpdater;
 import com.j11a.argus.observability.MetricNames;
 import com.j11a.argus.testsupport.AdminKeys;
 import com.j11a.argus.testsupport.Fixtures;
+import com.j11a.argus.testsupport.RssBody;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
@@ -203,7 +204,8 @@ class FeedApiIT extends AbstractIntegrationTest {
     @Test
     void twoFeedsOnTheSameSiteShareASource() throws Exception {
         stub.serveFixture("/api/world.xml", "bbc-like-rss2.xml");
-        stub.serveFixture("/api/world-2.xml", "bbc-like-rss2.xml");
+        stub.serve("/api/world-2.xml", 200, RssBody.CONTENT_TYPE, RssBody.withSelfLink(
+                Fixtures.feed("bbc-like-rss2.xml"), stub.baseUrl() + "/api/world-2.xml"));
 
         createFeed("/api/world.xml", "WORLD").andExpect(status().isCreated());
         createFeed("/api/world-2.xml", "WORLD").andExpect(status().isCreated());

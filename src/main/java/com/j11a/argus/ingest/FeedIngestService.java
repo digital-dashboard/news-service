@@ -7,9 +7,12 @@ import com.j11a.argus.feed.fetch.FetchValidators;
 import com.j11a.argus.feed.health.FailingThreshold;
 import com.j11a.argus.feed.health.FeedHealthGauges;
 import com.j11a.argus.feed.health.FeedHealthUpdater;
+import com.j11a.argus.feed.identity.FeedIdentityRegistry;
+import com.j11a.argus.feed.identity.FeedRedirectApplier;
 import com.j11a.argus.feed.parse.ParsedFeed;
 import com.j11a.argus.observability.LogFields;
 import com.j11a.argus.observability.LogKeys;
+import com.j11a.argus.source.FeedSourceChangedException;
 import com.j11a.argus.url.HttpUrls;
 import com.j11a.argus.web.error.ApiException;
 import com.j11a.argus.web.error.ErrorCode;
@@ -17,6 +20,7 @@ import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
@@ -41,11 +45,18 @@ public class FeedIngestService {
     private final FeedHealthUpdater healthUpdater;
     private final FeedHealthGauges healthGauges;
     private final int failingThreshold;
+    private final FeedRedirectApplier redirectApplier;
+    private final FeedIdentityRegistry identityRegistry;
     private final Clock clock;
+
+    /** The feed as it is after a persist, and the report. The feed differs from the input after a source change. */
+    private record Persisted(Feed feed, IngestReport report) {
+    }
 
     public FeedIngestService(FeedRepository feeds, FeedLoader loader, ArticlePersister persister,
             IngestTelemetry telemetry, FeedHealthUpdater healthUpdater,
-            FeedHealthGauges healthGauges, FailingThreshold failingThreshold, Clock clock) {
+            FeedHealthGauges healthGauges, FailingThreshold failingThreshold, FeedRedirectApplier redirectApplier,
+            FeedIdentityRegistry identityRegistry, Clock clock) {
         this.feeds = feeds;
         this.loader = loader;
         this.persister = persister;
@@ -53,6 +64,8 @@ public class FeedIngestService {
         this.healthUpdater = healthUpdater;
         this.healthGauges = healthGauges;
         this.failingThreshold = failingThreshold.value();
+        this.redirectApplier = redirectApplier;
+        this.identityRegistry = identityRegistry;
         this.clock = clock;
     }
 
@@ -75,12 +88,15 @@ public class FeedIngestService {
             return IngestReport.failed(feed.getId(), FailureReasons.INTERRUPTED);
         }
         return switch (loaded) {
-            case FeedLoader.Loaded.Parsed(var parsedFeed, var fetchedAt, var newValidators) ->
-                    persistAndRecord(feed, parsedFeed, fetchedAt, newValidators, now);
-            case FeedLoader.Loaded.NotModified(var notModified) -> {
-                logRecovery(feed, healthUpdater.recordNotModified(feed.getId(), notModified.validators(), now));
-                yield IngestReport.notModified(feed.getId());
-            }
+            case FeedLoader.Loaded.Parsed(var parsedFeed, var fetchedAt, var newValidators, var target) ->
+                    duplicateReport(feed, target, now)
+                            .orElseGet(() -> persistAndRecord(feed, parsedFeed, fetchedAt, newValidators, now));
+            case FeedLoader.Loaded.NotModified(var notModified) ->
+                    duplicateReport(feed, notModified.permanentTarget(), now).orElseGet(() -> {
+                        logRecovery(feed,
+                                healthUpdater.recordNotModified(feed.getId(), notModified.validators(), now));
+                        return IngestReport.notModified(feed.getId());
+                    });
             case FeedLoader.Loaded.Failed failed -> {
                 int consecutiveFailures = healthUpdater.recordFailure(feed.getId(), failed.lastError(), now);
                 logFailure(feed, failed, consecutiveFailures, null);
@@ -89,14 +105,77 @@ public class FeedIngestService {
         };
     }
 
+    /**
+     * Applies a permanent redirect before anything is persisted. When it points at another feed the applier has
+     * already disabled this one and logged it; the ingest ends there, and it is not a failure of the feed.
+     */
+    private Optional<IngestReport> duplicateReport(Feed feed, @Nullable URI permanentTarget, Instant now) {
+        if (permanentTarget == null) {
+            return Optional.empty();
+        }
+        FeedRedirectApplier.RedirectOutcome outcome;
+        try {
+            outcome = redirectApplier.apply(feed.getId(), feed.getSource().getKey(), feed.getUrl(), permanentTarget);
+        } catch (RuntimeException e) {
+            throw failedUnexpectedly(feed, FailureReasons.UNEXPECTED_ERROR, e, now);
+        }
+        return outcome instanceof FeedRedirectApplier.RedirectOutcome.Conflict
+                ? Optional.of(IngestReport.failed(feed.getId(), FailureReasons.DUPLICATE_FEED))
+                : Optional.empty();
+    }
+
     private IngestReport persistAndRecord(Feed feed, ParsedFeed parsed, Instant fetchedAt,
             FetchValidators validators, Instant now) {
         try {
-            IngestReport report = persist(feed, parsed, fetchedAt);
-            logRecovery(feed, healthUpdater.recordSuccess(feed.getId(), validators, now));
-            return report;
+            Persisted persisted = persistWithRetry(feed, parsed, fetchedAt);
+            if (persisted.report().outcome() == IngestReport.Outcome.FAILED) {
+                return persisted.report();
+            }
+            Feed current = persisted.feed();
+            logRecovery(current, healthUpdater.recordSuccess(current.getId(), validators, now));
+            recordSelfUrl(current.getId(), parsed);
+            return persisted.report();
         } catch (RuntimeException e) {
             throw failedUnexpectedly(feed, FailureReasons.PERSIST_FAILED, e, now);
+        }
+    }
+
+    // Best effort: the self link is only a bonus identity, so no failure here may fail the ingest.
+    private void recordSelfUrl(long feedId, ParsedFeed parsed) {
+        try {
+            identityRegistry.recordSelfUrl(feedId, parsed.selfLink());
+        } catch (RuntimeException e) {
+            log.atWarn()
+                    .setMessage("Feed " + feedId + " could not record its self link")
+                    .addKeyValue(LogKeys.FEED_ID, feedId)
+                    .setCause(e)
+                    .log();
+        }
+    }
+
+    /**
+     * The feed may have moved to another source since it was loaded, which the persister detects under the source
+     * lock. One retry with the feed re-read follows the move; a second mismatch is not the feed's fault, so it is a
+     * failed report that leaves the health counters alone.
+     */
+    private Persisted persistWithRetry(Feed feed, ParsedFeed parsed, Instant fetchedAt) {
+        try {
+            return new Persisted(feed, persist(feed, parsed, fetchedAt));
+        } catch (FeedSourceChangedException first) {
+            Feed current = feeds.findWithSourceById(feed.getId()).orElseThrow(() -> new ApiException(
+                    ErrorCode.FEED_NOT_FOUND, "Feed " + feed.getId() + " does not exist."));
+            MDC.put(LogKeys.SOURCE_ID, String.valueOf(current.getSource().getId()));
+            try {
+                return new Persisted(current, persist(current, parsed, fetchedAt));
+            } catch (FeedSourceChangedException second) {
+                log.atWarn()
+                        .setMessage(feedLabel(current.getId(), current.getSource().getKey())
+                                + " changed source twice during an ingest; nothing was written")
+                        .addKeyValue(LogKeys.SOURCE_KEY, current.getSource().getKey())
+                        .addKeyValue(LogKeys.REASON, FailureReasons.SOURCE_CHANGED)
+                        .log();
+                return new Persisted(current, IngestReport.failed(current.getId(), FailureReasons.SOURCE_CHANGED));
+            }
         }
     }
 
@@ -178,7 +257,7 @@ public class FeedIngestService {
 
     /** For callers that already fetched and parsed the feed: no second download. */
     public IngestReport ingestParsed(Feed feed, ParsedFeed parsed, Instant fetchedAt) {
-        return ingest(feed, () -> persist(feed, parsed, fetchedAt));
+        return ingest(feed, () -> persistWithRetry(feed, parsed, fetchedAt).report());
     }
 
     private IngestReport ingest(Feed feed, Supplier<IngestReport> work) {

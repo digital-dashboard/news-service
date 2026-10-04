@@ -5,6 +5,7 @@ import com.j11a.argus.feed.parse.ParsedEntry;
 import com.j11a.argus.ingest.dedup.DedupInput;
 import com.j11a.argus.ingest.dedup.EntryDedupResolver;
 import com.j11a.argus.ingest.dedup.Resolution;
+import com.j11a.argus.source.FeedSourceChangedException;
 import com.j11a.argus.source.SourceLock;
 import java.time.Clock;
 import java.time.Instant;
@@ -44,6 +45,7 @@ public class ArticlePersister {
         String sourceKey = feed.getSource().getKey();
 
         telemetry.lockWait(sourceKey, sourceId, () -> sourceLock.acquire(sourceId));
+        requireFeedStillIn(feedId, sourceId);
 
         // Re-read under the lock: a PATCH may have changed the homepage since the feed was loaded.
         String homepageUrl = jdbc.sql("SELECT homepage_url FROM source WHERE id = :id")
@@ -59,5 +61,21 @@ public class ArticlePersister {
                 () -> resolver.resolve(input));
 
         return applier.apply(sourceId, feedId, resolution, fetchedAt, clock.instant());
+    }
+
+    /**
+     * A move or merge may have changed the feed's source since it was loaded, and only the lock makes this read
+     * reliable. A mismatch rolls the transaction back so the caller can retry with the feed re-read. A feed that is
+     * gone is left to fail on its foreign key, as it always has.
+     */
+    private void requireFeedStillIn(long feedId, long sourceId) {
+        Long current = jdbc.sql("SELECT source_id FROM feed WHERE id = :id")
+                .param("id", feedId)
+                .query(Long.class)
+                .optional()
+                .orElse(null);
+        if (current != null && current != sourceId) {
+            throw new FeedSourceChangedException(feedId);
+        }
     }
 }
